@@ -699,61 +699,168 @@ with mode_col2:
             st.success("✅ Switched to Live Trading Mode")
         st.rerun()
 
-# ==================== GOODWILL OAUTH LOGIN ====================
+# ==================== FIXED GOODWILL OAUTH LOGIN ====================
 
 st.sidebar.subheader("🔐 Goodwill OAuth Login")
 
 if not st.session_state.gw_logged_in:
-    st.sidebar.markdown("**Step 1: Enter API Credentials**")
     
-    api_key = st.sidebar.text_input(
-        "API Key", 
-        type="password",
-        help="Your Goodwill API Key from developer portal"
-    )
+    # Initialize OAuth state if not exists
+    if 'oauth_step' not in st.session_state:
+        st.session_state.oauth_step = 1
+    if 'oauth_api_key' not in st.session_state:
+        st.session_state.oauth_api_key = ""
+    if 'oauth_api_secret' not in st.session_state:
+        st.session_state.oauth_api_secret = ""
+    if 'oauth_login_url' not in st.session_state:
+        st.session_state.oauth_login_url = ""
     
-    api_secret = st.sidebar.text_input(
-        "API Secret", 
-        type="password",
-        help="Your Goodwill API Secret from developer portal"
-    )
-    
-    if api_key:
-        login_url = bot.data_feed.get_login_url(api_key)
+    # STEP 1: Enter and Submit API Credentials
+    if st.session_state.oauth_step == 1:
+        st.sidebar.markdown("**Step 1: Enter API Credentials**")
         
+        api_key = st.sidebar.text_input(
+            "API Key", 
+            value=st.session_state.oauth_api_key,
+            type="password",
+            help="Your Goodwill API Key from developer portal"
+        )
+        
+        api_secret = st.sidebar.text_input(
+            "API Secret", 
+            value=st.session_state.oauth_api_secret,
+            type="password",
+            help="Your Goodwill API Secret from developer portal"
+        )
+        
+        # Submit credentials button
+        if st.sidebar.button("📝 Submit Credentials", use_container_width=True):
+            if api_key and api_secret:
+                # Store credentials
+                st.session_state.oauth_api_key = api_key
+                st.session_state.oauth_api_secret = api_secret
+                
+                # Generate login URL
+                login_url = bot.data_feed.get_login_url(api_key)
+                st.session_state.oauth_login_url = login_url
+                
+                # Move to step 2
+                st.session_state.oauth_step = 2
+                st.success("✅ Credentials submitted! Proceeding to login...")
+                time.sleep(1)
+                st.rerun()
+            else:
+                st.error("❌ Please enter both API Key and Secret")
+        
+        # Instructions for Step 1
+        st.sidebar.markdown("---")
+        st.sidebar.info("**Step 1 Instructions:**\n1. Enter your API Key and Secret\n2. Click 'Submit Credentials'\n3. This will validate and prepare the OAuth flow")
+    
+    # STEP 2: Login to Goodwill
+    elif st.session_state.oauth_step == 2:
         st.sidebar.markdown("**Step 2: Login to Goodwill**")
-        st.sidebar.markdown(f"[🚀 **Click Here to Login**]({login_url})")
-        st.sidebar.caption("This will open Goodwill login page")
+        st.sidebar.success(f"✅ Using API Key: {st.session_state.oauth_api_key[:8]}...")
         
+        # Show login link
+        st.sidebar.markdown(f"[🚀 **Click Here to Login**]({st.session_state.oauth_login_url})")
+        st.sidebar.caption("⚠️ This will open Goodwill login page")
+        
+        # What to expect
+        st.sidebar.info("""
+        **What happens next:**
+        1. Click the login link above
+        2. Login with your Goodwill credentials
+        3. After login, you'll get a URL with 'request_token'
+        4. Copy the request_token value
+        5. Return here and paste it below
+        """)
+        
+        # Button to proceed to step 3
+        if st.sidebar.button("✅ I've Logged In - Enter Token", use_container_width=True):
+            st.session_state.oauth_step = 3
+            st.rerun()
+        
+        # Back button
+        if st.sidebar.button("⬅️ Back to Step 1", use_container_width=True):
+            st.session_state.oauth_step = 1
+            st.rerun()
+    
+    # STEP 3: Enter Request Token
+    elif st.session_state.oauth_step == 3:
         st.sidebar.markdown("**Step 3: Enter Request Token**")
-        st.sidebar.info("After login, copy the 'request_token' from URL")
+        st.sidebar.success(f"✅ Credentials Ready: {st.session_state.oauth_api_key[:8]}...")
+        
+        # Show expected URL format
+        st.sidebar.markdown("**Look for URL like:**")
+        st.sidebar.code("http://localhost:8501/?request_token=ABC123XYZ...")
+        st.sidebar.caption("Copy only the ABC123XYZ... part")
         
         request_token = st.sidebar.text_input(
             "Request Token",
-            help="Copy from URL after successful login"
+            help="Copy the 'request_token' parameter from redirect URL",
+            placeholder="e.g., ABC123XYZ789..."
         )
         
-        if st.sidebar.button("🔗 Complete Login", use_container_width=True):
-            if api_key and api_secret and request_token:
-                with st.spinner("Exchanging tokens..."):
-                    success = bot.data_feed.exchange_token(api_key, request_token, api_secret)
-                    if success:
-                        st.success("✅ Successfully logged in to Goodwill!")
-                        time.sleep(1)
-                        st.rerun()
-            else:
-                st.error("❌ Please fill in all fields")
+        # Complete OAuth login
+        col1, col2 = st.sidebar.columns(2)
+        with col1:
+            if st.button("🔗 Complete Login", use_container_width=True):
+                if request_token:
+                    with st.spinner("Exchanging tokens..."):
+                        success = bot.data_feed.exchange_token(
+                            st.session_state.oauth_api_key, 
+                            request_token, 
+                            st.session_state.oauth_api_secret
+                        )
+                        if success:
+                            # Reset OAuth state
+                            st.session_state.oauth_step = 1
+                            st.session_state.oauth_api_key = ""
+                            st.session_state.oauth_api_secret = ""
+                            st.session_state.oauth_login_url = ""
+                            
+                            st.success("✅ Successfully logged in to Goodwill!")
+                            st.balloons()
+                            time.sleep(2)
+                            st.rerun()
+                        else:
+                            st.error("❌ Token exchange failed. Please try again.")
+                else:
+                    st.error("❌ Please enter the request token")
+        
+        with col2:
+            if st.button("⬅️ Back", use_container_width=True):
+                st.session_state.oauth_step = 2
+                st.rerun()
+        
+        # Troubleshooting section
+        st.sidebar.markdown("---")
+        st.sidebar.markdown("**🔧 Troubleshooting:**")
+        st.sidebar.markdown("""
+        **No request_token in URL?**
+        - Make sure you clicked the login link from Step 2
+        - Complete the full login process (User ID + Password + OTP)
+        - Look for the redirect URL in your browser
+        - Check if you're being redirected to localhost:8501
+        
+        **Token looks wrong?**
+        - Don't include 'request_token=' in your input
+        - Copy only the value after the = sign
+        - Remove any extra characters or spaces
+        """)
     
+    # Show current step indicator
     st.sidebar.markdown("---")
-    st.sidebar.markdown("**📋 Login Instructions:**")
-    st.sidebar.markdown("""
-    1. Enter your **API Key** and **API Secret**
-    2. Click the **Login** link to open Goodwill
-    3. Login with **User ID + Password + OTP**
-    4. Copy the **request_token** from URL
-    5. Paste it back here and click **Complete Login**
-    """)
+    step_indicator = f"**Current Step: {st.session_state.oauth_step}/3**"
+    if st.session_state.oauth_step == 1:
+        step_indicator += " - Enter Credentials"
+    elif st.session_state.oauth_step == 2:
+        step_indicator += " - Login to Goodwill"
+    elif st.session_state.oauth_step == 3:
+        step_indicator += " - Enter Token"
     
+    st.sidebar.info(step_indicator)
+
 else:
     # Show logged in status
     client_id = st.session_state.get("gw_client_id", "Unknown")
@@ -766,9 +873,32 @@ else:
     
     st.sidebar.info(f"Connected: {connection_time}")
     
+    # Test connection button
+    if st.sidebar.button("🧪 Test Connection", use_container_width=True):
+        with st.spinner("Testing API connection..."):
+            # Try to fetch a test symbol
+            test_data = bot.data_feed.get_live_data("RELIANCE")
+            if test_data:
+                st.sidebar.success("✅ API connection working!")
+                st.sidebar.json({
+                    "Symbol": "RELIANCE",
+                    "Price": f"₹{test_data['price']:.2f}",
+                    "Volume": f"{test_data['volume']:,}",
+                    "Timestamp": test_data['timestamp'].strftime("%H:%M:%S")
+                })
+            else:
+                st.sidebar.error("❌ API connection failed")
+    
     if st.sidebar.button("🚪 Logout", use_container_width=True):
         bot.data_feed.logout()
         bot.is_running = False
+        
+        # Reset OAuth state
+        st.session_state.oauth_step = 1
+        st.session_state.oauth_api_key = ""
+        st.session_state.oauth_api_secret = ""
+        st.session_state.oauth_login_url = ""
+        
         st.success("✅ Logged out successfully")
         st.rerun()
 
@@ -1237,20 +1367,86 @@ if st.sidebar.checkbox("🔍 Debug Info"):
     }
     st.sidebar.json(debug_info)
 
-# ==================== OAUTH HELP SECTION ====================
+# ==================== ENHANCED OAUTH HELP SECTION ====================
 
-with st.sidebar.expander("❓ OAuth Help", expanded=False):
-    st.markdown("**How to get API credentials:**")
-    st.markdown("1. Go to [developer.gwcindia.in](https://developer.gwcindia.in)")
-    st.markdown("2. Register/Login to get API Key & Secret")
-    st.markdown("3. Set redirect URL to: `http://localhost:8501`")
+with st.sidebar.expander("❓ OAuth Help & Troubleshooting", expanded=False):
+    st.markdown("### **Prerequisites:**")
+    st.markdown("""
+    1. **Register at Goodwill Developer Portal:**
+       - Go to [developer.gwcindia.in](https://developer.gwcindia.in)
+       - Create account and verify email
     
-    st.markdown("**Login process:**")
-    st.markdown("1. Enter API Key & Secret")
-    st.markdown("2. Click login link")
-    st.markdown("3. Login with User ID + Password + OTP")
-    st.markdown("4. Copy request_token from URL")
-    st.markdown("5. Paste here and complete login")
+    2. **Create Application:**
+       - Create new app in developer portal
+       - Note down your **API Key** and **API Secret**
+       - Set redirect URI to: `http://localhost:8501`
+    """)
+    
+    st.markdown("### **Step-by-Step Process:**")
+    st.markdown("""
+    **Step 1: Submit Credentials**
+    - Enter API Key and Secret
+    - Click "Submit Credentials"
+    - System validates and prepares OAuth flow
+    
+    **Step 2: Login to Goodwill**
+    - Click the generated login link
+    - Login with Goodwill User ID + Password + OTP
+    - You'll be redirected back with request_token
+    
+    **Step 3: Complete OAuth**
+    - Copy the request_token from URL
+    - Paste it and click "Complete Login"
+    - System exchanges token for access_token
+    """)
+    
+    st.markdown("### **Common Issues:**")
+    st.markdown("""
+    **❌ No request_token in URL:**
+    - Ensure you clicked login link from Step 2
+    - Complete full Goodwill login process
+    - Check redirect URL format
+    
+    **❌ Invalid credentials:**
+    - Verify API Key and Secret from developer portal
+    - Ensure redirect URI is set correctly
+    
+    **❌ Token exchange fails:**
+    - Check request_token format (no extra characters)
+    - Try the process again from Step 1
+    """)
+    
+    st.markdown("### **Expected URL Format:**")
+    st.code("""
+# After successful login, you should see:
+http://localhost:8501/?request_token=ABC123XYZ&status=success
+
+# Copy only this part:
+ABC123XYZ
+    """)
+
+# ==================== DEBUG OAUTH STATE ====================
+
+if st.sidebar.checkbox("🔍 Debug OAuth State"):
+    st.sidebar.subheader("OAuth Debug Info")
+    debug_oauth = {
+        "Current Step": st.session_state.get('oauth_step', 'Not Set'),
+        "API Key Stored": bool(st.session_state.get('oauth_api_key', '')),
+        "API Secret Stored": bool(st.session_state.get('oauth_api_secret', '')),
+        "Login URL Generated": bool(st.session_state.get('oauth_login_url', '')),
+        "Currently Logged In": st.session_state.gw_logged_in,
+        "Connection Status": bot.data_feed.is_connected
+    }
+    st.sidebar.json(debug_oauth)
+    
+    # Reset OAuth state button
+    if st.sidebar.button("🔄 Reset OAuth State", use_container_width=True):
+        st.session_state.oauth_step = 1
+        st.session_state.oauth_api_key = ""
+        st.session_state.oauth_api_secret = ""
+        st.session_state.oauth_login_url = ""
+        st.sidebar.success("OAuth state reset!")
+        st.rerun()
 
 # ==================== FOOTER ====================
 
@@ -1281,4 +1477,4 @@ if not bot.is_running:
     else:
         st.info("💡 **Bot is ready! Click 'Start Bot' to begin trading with Goodwill live data via OAuth.**")
 
-# ==================== END OF COMPLETE APPLICATION ====================
+# ==================== END OF COMPLETE APPLICATION ==================== 
