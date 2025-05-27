@@ -21,6 +21,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 import sqlite3
 import threading
+import gwcmodel
 from queue import Queue
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
