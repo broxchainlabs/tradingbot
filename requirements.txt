@@ -3,5 +3,4 @@ yfinance
 pandas
 numpy
 plotly
-sqlite3
 gwcmodel
