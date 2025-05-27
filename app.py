@@ -510,6 +510,8 @@ class AdaptiveScalpingBot:
         else:
             current_pnl = (position['entry_price'] - current_price) * position['quantity']
         
+        
+        
         position['highest_profit'] = max(position['highest_profit'], current_pnl)
         position['lowest_profit'] = min(position['lowest_profit'], current_pnl)
         
@@ -730,9 +732,6 @@ else:
     user_id = st.session_state.get("gw_user_id", "Unknown")
     st.sidebar.success(f"✅ Logged in as: {user_id}")
     
-    # ==================== CONTINUATION FROM MAIN APP.PY ====================
-# This continues from where the main file was cut off at "connection"
-
     connection_time = ""
     if bot.data_feed.last_login_time:
         elapsed = datetime.now() - bot.data_feed.last_login_time
@@ -1239,4 +1238,4 @@ if not bot.is_running:
     else:
         st.info("💡 **Bot is ready! Click 'Start Bot' to begin trading with Goodwill live data.**")
 
-# ==================== END OF UI ====================
+# ==================== END OF COMPLETE APPLICATION ====================
