@@ -42,10 +42,10 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# ==================== CORE CLASSES ====================
+# ==================== ENHANCED CORE CLASSES ====================
 
 class GoodwillOAuthHandler:
-    """Handles Goodwill OAuth authentication flow"""
+    """Enhanced Goodwill OAuth authentication flow with debugging"""
     
     def __init__(self):
         self.session = None
@@ -57,6 +57,15 @@ class GoodwillOAuthHandler:
         self.instrument_token_map = {}
         self.last_login_time = None
         
+        # Multiple possible OAuth endpoints to try
+        self.oauth_endpoints = [
+            "https://api.gwcindia.in/oauth/login",
+            "https://web.gwcindia.in/oauth/login", 
+            "https://developer.gwcindia.in/oauth/login",
+            "https://api.gwcindia.in/v1/login",
+            "https://oauth.gwcindia.in/login"
+        ]
+        
     def generate_signature(self, api_key, request_token, api_secret):
         """Generate SHA-256 signature for Goodwill API"""
         checksum = f"{api_key}{request_token}{api_secret}"
@@ -64,59 +73,246 @@ class GoodwillOAuthHandler:
         return signature
     
     def get_login_url(self, api_key):
-        """Generate Goodwill login URL"""
+        """Generate Goodwill login URL with proper OAuth parameters"""
         self.api_key = api_key
-        return f"https://api.gwcindia.in/v1/login?api_key={api_key}"
+        
+        # Standard OAuth parameters
+        import urllib.parse
+        
+        params = {
+            'api_key': api_key,
+            'response_type': 'code',
+            'redirect_uri': 'http://localhost:8501',
+            'state': 'trading_bot_auth'
+        }
+        
+        query_string = urllib.parse.urlencode(params)
+        
+        # Try different possible OAuth endpoints
+        possible_urls = []
+        for endpoint in self.oauth_endpoints:
+            possible_urls.append(f"{endpoint}?{query_string}")
+        
+        # Return the most likely correct URL first
+        primary_url = f"https://api.gwcindia.in/v1/login?api_key={api_key}&redirect_uri=http://localhost:8501&response_type=code"
+        
+        return primary_url
     
-    def exchange_token(self, api_key, request_token, api_secret):
-        """Exchange request_token for access_token"""
+    def validate_and_extract_token(self, url_or_token):
+        """Extract request_token from URL or validate direct token input"""
+        import urllib.parse
+        
+        # If it looks like a URL, parse it
+        if url_or_token.startswith('http'):
+            try:
+                parsed_url = urllib.parse.urlparse(url_or_token)
+                query_params = urllib.parse.parse_qs(parsed_url.query)
+                
+                # Look for different possible parameter names
+                token_params = ['request_token', 'code', 'authorization_code', 'token']
+                
+                for param in token_params:
+                    if param in query_params:
+                        token = query_params[param][0]
+                        st.sidebar.success(f"✅ Extracted {param}: {token[:10]}...")
+                        return token
+                
+                st.sidebar.error("❌ No token found in URL. Available parameters:")
+                st.sidebar.json(query_params)
+                return None
+                
+            except Exception as e:
+                st.sidebar.error(f"❌ URL parsing error: {e}")
+                return None
+        
+        # If it's a direct token, validate format
+        else:
+            # Basic validation
+            if len(url_or_token) < 10:
+                st.sidebar.error("❌ Token too short")
+                return None
+            
+            # Remove common prefixes/suffixes
+            token = url_or_token.strip()
+            token = token.replace('request_token=', '')
+            token = token.replace('code=', '')
+            token = token.split('&')[0]  # Remove any additional parameters
+            
+            return token
+    
+    def exchange_token(self, api_key, request_token_input, api_secret):
+        """Exchange request_token for access_token with enhanced debugging"""
         if not REQUESTS_IMPORTED:
             st.error("❌ requests library required")
             return False
         
         try:
+            # Extract and validate token
+            request_token = self.validate_and_extract_token(request_token_input)
+            if not request_token:
+                st.error("❌ Invalid token format")
+                return False
+            
             self.api_key = api_key
             self.api_secret = api_secret
             
             # Generate signature
             signature = self.generate_signature(api_key, request_token, api_secret)
             
-            # Exchange token
-            url = "https://api.gwcindia.in/v1/login-response"
-            payload = {
-                "api_key": api_key,
-                "request_token": request_token,
-                "signature": signature
-            }
+            st.sidebar.info(f"🔍 Debug Info:")
+            st.sidebar.json({
+                "API Key": f"{api_key[:8]}...",
+                "Request Token": f"{request_token[:10]}...",
+                "Signature": f"{signature[:16]}..."
+            })
             
-            headers = {"Content-Type": "application/json"}
-            response = requests.post(url, json=payload, headers=headers, timeout=10)
-            response.raise_for_status()
+            # Try multiple token exchange endpoints
+            token_endpoints = [
+                "https://api.gwcindia.in/v1/login-response",
+                "https://api.gwcindia.in/oauth/token",
+                "https://web.gwcindia.in/oauth/token",
+                "https://developer.gwcindia.in/oauth/token"
+            ]
             
-            data = response.json()
+            # Prepare multiple payload formats
+            payloads = [
+                # Format 1: JSON with signature
+                {
+                    "api_key": api_key,
+                    "request_token": request_token,
+                    "signature": signature
+                },
+                # Format 2: Standard OAuth
+                {
+                    "grant_type": "authorization_code",
+                    "client_id": api_key,
+                    "client_secret": api_secret,
+                    "code": request_token,
+                    "redirect_uri": "http://localhost:8501"
+                },
+                # Format 3: Goodwill specific
+                {
+                    "api_key": api_key,
+                    "authorization_code": request_token,
+                    "api_secret": api_secret,
+                    "signature": signature
+                }
+            ]
             
-            if data.get("status") == "success" and "data" in data:
-                self.access_token = data["data"]["access_token"]
-                self.client_id = data["data"]["clnt_id"]
-                self.is_connected = True
-                self.last_login_time = datetime.now()
-                
-                # Store in session state
-                st.session_state["gw_logged_in"] = True
-                st.session_state["gw_access_token"] = self.access_token
-                st.session_state["gw_client_id"] = self.client_id
-                st.session_state["gw_api_key"] = api_key
-                
-                self.setup_session()
-                self.load_instrument_tokens()
-                return True
-            else:
-                st.error(f"❌ Token exchange failed: {data.get('error_msg', 'Unknown error')}")
-                return False
-                
-        except requests.exceptions.RequestException as e:
-            st.error(f"❌ Request error: {e}")
+            headers_options = [
+                {"Content-Type": "application/json"},
+                {"Content-Type": "application/x-www-form-urlencoded"}
+            ]
+            
+            # Try all combinations
+            for endpoint in token_endpoints:
+                for payload in payloads:
+                    for headers in headers_options:
+                        try:
+                            st.sidebar.info(f"🔄 Trying: {endpoint.split('/')[-1]} with {list(payload.keys())}")
+                            
+                            if headers["Content-Type"] == "application/json":
+                                response = requests.post(endpoint, json=payload, headers=headers, timeout=15)
+                            else:
+                                response = requests.post(endpoint, data=payload, headers=headers, timeout=15)
+                            
+                            st.sidebar.info(f"📡 Response: {response.status_code}")
+                            
+                            if response.status_code == 200:
+                                try:
+                                    data = response.json()
+                                    st.sidebar.json({"Response": data})
+                                    
+                                    # Look for access token in response
+                                    if data.get("status") == "success" and "data" in data:
+                                        token_data = data["data"]
+                                        self.access_token = token_data.get("access_token")
+                                        self.client_id = token_data.get("clnt_id") or token_data.get("client_id")
+                                        
+                                        if self.access_token:
+                                            self.is_connected = True
+                                            self.last_login_time = datetime.now()
+                                            
+                                            # Store in session state
+                                            st.session_state["gw_logged_in"] = True
+                                            st.session_state["gw_access_token"] = self.access_token
+                                            st.session_state["gw_client_id"] = self.client_id
+                                            st.session_state["gw_api_key"] = api_key
+                                            
+                                            self.setup_session()
+                                            self.load_instrument_tokens()
+                                            return True
+                                    
+                                    # Check for direct access_token in response
+                                    elif "access_token" in data:
+                                        self.access_token = data["access_token"]
+                                        self.client_id = data.get("client_id", "goodwill_user")
+                                        self.is_connected = True
+                                        self.last_login_time = datetime.now()
+                                        
+                                        # Store in session state
+                                        st.session_state["gw_logged_in"] = True
+                                        st.session_state["gw_access_token"] = self.access_token
+                                        st.session_state["gw_client_id"] = self.client_id
+                                        st.session_state["gw_api_key"] = api_key
+                                        
+                                        self.setup_session()
+                                        self.load_instrument_tokens()
+                                        return True
+                                    
+                                    else:
+                                        st.sidebar.warning(f"⚠️ Success but no token: {data}")
+                                        
+                                except json.JSONDecodeError:
+                                    # Try to parse as plain text
+                                    response_text = response.text
+                                    st.sidebar.warning(f"⚠️ Non-JSON response: {response_text[:100]}...")
+                                    
+                                    # Look for token in plain text response
+                                    if "access_token" in response_text:
+                                        # Try to extract token from text
+                                        import re
+                                        token_match = re.search(r'access_token["\s]*[:=]["\s]*([a-zA-Z0-9]+)', response_text)
+                                        if token_match:
+                                            self.access_token = token_match.group(1)
+                                            self.is_connected = True
+                                            self.last_login_time = datetime.now()
+                                            
+                                            # Store in session state
+                                            st.session_state["gw_logged_in"] = True
+                                            st.session_state["gw_access_token"] = self.access_token
+                                            st.session_state["gw_client_id"] = "goodwill_user"
+                                            st.session_state["gw_api_key"] = api_key
+                                            
+                                            self.setup_session()
+                                            self.load_instrument_tokens()
+                                            return True
+                            
+                            elif response.status_code == 400:
+                                try:
+                                    error_data = response.json()
+                                    st.sidebar.error(f"❌ Bad Request: {error_data.get('error_msg', 'Invalid parameters')}")
+                                except:
+                                    st.sidebar.error(f"❌ Bad Request: {response.text[:100]}")
+                            
+                            elif response.status_code == 401:
+                                st.sidebar.error("❌ Unauthorized: Check API credentials")
+                            
+                            else:
+                                st.sidebar.warning(f"⚠️ HTTP {response.status_code}: {response.text[:100]}")
+                                
+                        except requests.exceptions.RequestException as e:
+                            st.sidebar.warning(f"⚠️ Connection error for {endpoint}: {e}")
+                            continue
+            
+            st.error("❌ All token exchange attempts failed. Please check:")
+            st.error("1. API Key and Secret are correct")
+            st.error("2. Request token is properly copied")
+            st.error("3. You completed the login process")
+            st.error("4. Redirect URI is set to http://localhost:8501 in Goodwill portal")
+            
             return False
+                
         except Exception as e:
             st.error(f"❌ Token exchange error: {e}")
             return False
@@ -137,8 +333,6 @@ class GoodwillOAuthHandler:
             "BAJFINANCE", "RELIANCE", "INFY", "TCS", "ADANIPORTS"
         ]
         
-        # For now, we'll fetch tokens dynamically when needed
-        # This is more efficient than pre-loading all symbols
         st.success(f"✅ Ready to trade {len(symbols)} symbols")
     
     def get_instrument_token(self, symbol):
@@ -146,7 +340,6 @@ class GoodwillOAuthHandler:
         if symbol in self.instrument_token_map:
             return self.instrument_token_map[symbol]
         
-        # Fetch token dynamically
         try:
             response = self.session.post(
                 "https://api.gwcindia.in/v1/fetchsymbol",
@@ -175,7 +368,6 @@ class GoodwillOAuthHandler:
             return None
         
         try:
-            # Prepare order payload
             payload = {
                 "tsym": f"{symbol}-EQ",
                 "exchange": "NSE",
@@ -570,7 +762,9 @@ class AdaptiveScalpingBot:
         
         self.capital += pnl
         self.pnl += pnl
-        
+        # ==================== CONTINUATION FROM close_position METHOD ====================
+# Continue from: self.pnl += pnl
+
         hold_time = (datetime.now() - position['entry_time']).total_seconds()
         
         trade_record = {
@@ -699,7 +893,7 @@ with mode_col2:
             st.success("✅ Switched to Live Trading Mode")
         st.rerun()
 
-# ==================== FIXED GOODWILL OAUTH LOGIN ====================
+# ==================== ENHANCED GOODWILL OAUTH LOGIN WITH DEBUGGING ====================
 
 st.sidebar.subheader("🔐 Goodwill OAuth Login")
 
@@ -712,8 +906,8 @@ if not st.session_state.gw_logged_in:
         st.session_state.oauth_api_key = ""
     if 'oauth_api_secret' not in st.session_state:
         st.session_state.oauth_api_secret = ""
-    if 'oauth_login_url' not in st.session_state:
-        st.session_state.oauth_login_url = ""
+    if 'oauth_login_urls' not in st.session_state:
+        st.session_state.oauth_login_urls = []
     
     # STEP 1: Enter and Submit API Credentials
     if st.session_state.oauth_step == 1:
@@ -740,9 +934,8 @@ if not st.session_state.gw_logged_in:
                 st.session_state.oauth_api_key = api_key
                 st.session_state.oauth_api_secret = api_secret
                 
-                # Generate login URL
-                login_url = bot.data_feed.get_login_url(api_key)
-                st.session_state.oauth_login_url = login_url
+                # Generate multiple login URLs
+                primary_url = bot.data_feed.get_login_url(api_key)
                 
                 # Move to step 2
                 st.session_state.oauth_step = 2
@@ -756,24 +949,49 @@ if not st.session_state.gw_logged_in:
         st.sidebar.markdown("---")
         st.sidebar.info("**Step 1 Instructions:**\n1. Enter your API Key and Secret\n2. Click 'Submit Credentials'\n3. This will validate and prepare the OAuth flow")
     
-    # STEP 2: Login to Goodwill
+    # STEP 2: Login to Goodwill with Multiple Options
     elif st.session_state.oauth_step == 2:
         st.sidebar.markdown("**Step 2: Login to Goodwill**")
         st.sidebar.success(f"✅ Using API Key: {st.session_state.oauth_api_key[:8]}...")
         
-        # Show login link
-        st.sidebar.markdown(f"[🚀 **Click Here to Login**]({st.session_state.oauth_login_url})")
-        st.sidebar.caption("⚠️ This will open Goodwill login page")
+        # Show multiple login options
+        st.sidebar.markdown("**🔗 Try These Login URLs:**")
+        st.sidebar.caption("If one doesn't work, try the next one")
+        
+        # Generate URLs with the stored API key
+        login_urls = [
+            f"https://api.gwcindia.in/v1/login?api_key={st.session_state.oauth_api_key}&redirect_uri=http://localhost:8501&response_type=code",
+            f"https://web.gwcindia.in/oauth/login?api_key={st.session_state.oauth_api_key}&redirect_uri=http://localhost:8501",
+            f"https://developer.gwcindia.in/oauth/login?client_id={st.session_state.oauth_api_key}&redirect_uri=http://localhost:8501&response_type=code",
+            f"https://api.gwcindia.in/oauth/authorize?api_key={st.session_state.oauth_api_key}&redirect_uri=http://localhost:8501&response_type=code"
+        ]
+        
+        for i, url in enumerate(login_urls, 1):
+            st.sidebar.markdown(f"[🚀 **Login Option {i}**]({url})")
         
         # What to expect
         st.sidebar.info("""
         **What happens next:**
-        1. Click the login link above
+        1. Click ANY of the login links above
         2. Login with your Goodwill credentials
-        3. After login, you'll get a URL with 'request_token'
-        4. Copy the request_token value
+        3. Look for redirect URL with token parameter
+        4. Copy the token value or entire URL
         5. Return here and paste it below
         """)
+        
+        # Advanced: Manual URL construction
+        with st.sidebar.expander("🔧 Manual URL Builder", expanded=False):
+            st.markdown("**Build your own login URL:**")
+            
+            custom_base = st.selectbox("Base URL:", [
+                "https://api.gwcindia.in/v1/login",
+                "https://web.gwcindia.in/oauth/login",
+                "https://developer.gwcindia.in/oauth/login",
+                "https://oauth.gwcindia.in/login"
+            ])
+            
+            custom_url = f"{custom_base}?api_key={st.session_state.oauth_api_key}&redirect_uri=http://localhost:8501&response_type=code"
+            st.markdown(f"[🔗 **Custom URL**]({custom_url})")
         
         # Button to proceed to step 3
         if st.sidebar.button("✅ I've Logged In - Enter Token", use_container_width=True):
@@ -785,31 +1003,59 @@ if not st.session_state.gw_logged_in:
             st.session_state.oauth_step = 1
             st.rerun()
     
-    # STEP 3: Enter Request Token
+    # STEP 3: Enter Request Token with Enhanced Input Options
     elif st.session_state.oauth_step == 3:
         st.sidebar.markdown("**Step 3: Enter Request Token**")
         st.sidebar.success(f"✅ Credentials Ready: {st.session_state.oauth_api_key[:8]}...")
         
-        # Show expected URL format
-        st.sidebar.markdown("**Look for URL like:**")
-        st.sidebar.code("http://localhost:8501/?request_token=ABC123XYZ...")
-        st.sidebar.caption("Copy only the ABC123XYZ... part")
+        # Show expected URL formats
+        st.sidebar.markdown("**🎯 Look for these URL patterns:**")
+        st.sidebar.code("""
+# Pattern 1:
+localhost:8501/?request_token=ABC123
+
+# Pattern 2:
+localhost:8501/?code=XYZ789
+
+# Pattern 3:
+localhost:8501/?authorization_code=DEF456
+        """)
         
+        # Input option 1: Direct token
+        st.sidebar.markdown("**Option 1: Enter Token Directly**")
         request_token = st.sidebar.text_input(
             "Request Token",
-            help="Copy the 'request_token' parameter from redirect URL",
+            help="Copy the token value from URL",
             placeholder="e.g., ABC123XYZ789..."
         )
+        
+        # Input option 2: Full URL
+        st.sidebar.markdown("**Option 2: Paste Entire URL**")
+        full_url = st.sidebar.text_area(
+            "Full Redirect URL",
+            help="Paste the complete URL you were redirected to",
+            placeholder="http://localhost:8501/?request_token=ABC123&status=success"
+        )
+        
+        # Determine which input to use
+        token_input = full_url if full_url else request_token
+        
+        # Token validation
+        if token_input:
+            if token_input.startswith('http'):
+                st.sidebar.info("🔍 URL detected - will extract token automatically")
+            else:
+                st.sidebar.info(f"🔍 Token detected: {token_input[:10]}...")
         
         # Complete OAuth login
         col1, col2 = st.sidebar.columns(2)
         with col1:
             if st.button("🔗 Complete Login", use_container_width=True):
-                if request_token:
+                if token_input:
                     with st.spinner("Exchanging tokens..."):
                         success = bot.data_feed.exchange_token(
                             st.session_state.oauth_api_key, 
-                            request_token, 
+                            token_input,  # This can be URL or direct token
                             st.session_state.oauth_api_secret
                         )
                         if success:
@@ -817,36 +1063,73 @@ if not st.session_state.gw_logged_in:
                             st.session_state.oauth_step = 1
                             st.session_state.oauth_api_key = ""
                             st.session_state.oauth_api_secret = ""
-                            st.session_state.oauth_login_url = ""
+                            st.session_state.oauth_login_urls = []
                             
                             st.success("✅ Successfully logged in to Goodwill!")
                             st.balloons()
                             time.sleep(2)
                             st.rerun()
                         else:
-                            st.error("❌ Token exchange failed. Please try again.")
+                            st.error("❌ Token exchange failed. Check debug info above.")
                 else:
-                    st.error("❌ Please enter the request token")
+                    st.error("❌ Please enter the request token or full URL")
         
         with col2:
             if st.button("⬅️ Back", use_container_width=True):
                 st.session_state.oauth_step = 2
                 st.rerun()
         
-        # Troubleshooting section
+        # Enhanced troubleshooting section
         st.sidebar.markdown("---")
         st.sidebar.markdown("**🔧 Troubleshooting:**")
-        st.sidebar.markdown("""
-        **No request_token in URL?**
-        - Make sure you clicked the login link from Step 2
-        - Complete the full login process (User ID + Password + OTP)
-        - Look for the redirect URL in your browser
-        - Check if you're being redirected to localhost:8501
         
-        **Token looks wrong?**
-        - Don't include 'request_token=' in your input
-        - Copy only the value after the = sign
-        - Remove any extra characters or spaces
+        # Check URL parameters
+        if full_url:
+            try:
+                import urllib.parse
+                parsed = urllib.parse.urlparse(full_url)
+                params = urllib.parse.parse_qs(parsed.query)
+                
+                st.sidebar.markdown("**URL Analysis:**")
+                if params:
+                    st.sidebar.json(params)
+                    
+                    # Check for common token parameters
+                    token_found = False
+                    for param in ['request_token', 'code', 'authorization_code', 'token']:
+                        if param in params:
+                            st.sidebar.success(f"✅ Found {param}: {params[param][0][:10]}...")
+                            token_found = True
+                            break
+                    
+                    if not token_found:
+                        st.sidebar.error("❌ No recognized token parameter found")
+                        st.sidebar.markdown("**Try:**")
+                        st.sidebar.markdown("- Different login URL from Step 2")
+                        st.sidebar.markdown("- Complete the full login process")
+                        st.sidebar.markdown("- Check if redirect URI is correctly set")
+                else:
+                    st.sidebar.error("❌ No parameters found in URL")
+                    
+            except Exception as e:
+                st.sidebar.error(f"❌ URL parsing error: {e}")
+        
+        # Common issues
+        st.sidebar.markdown("**❌ Common Issues:**")
+        st.sidebar.markdown("""
+        **No token in URL?**
+        - Try different login URLs from Step 2
+        - Complete full login (User ID + Password + OTP)
+        - Check redirect URI in Goodwill developer portal
+        
+        **Wrong redirect URL?**
+        - Ensure redirect URI is: `http://localhost:8501`
+        - Check it's saved in your Goodwill app settings
+        
+        **Still not working?**
+        - Try manual token entry
+        - Contact Goodwill API support
+        - Check if API credentials are active
         """)
     
     # Show current step indicator
@@ -862,7 +1145,7 @@ if not st.session_state.gw_logged_in:
     st.sidebar.info(step_indicator)
 
 else:
-    # Show logged in status
+    # Show logged in status with enhanced info
     client_id = st.session_state.get("gw_client_id", "Unknown")
     st.sidebar.success(f"✅ Logged in as: {client_id}")
     
@@ -873,21 +1156,30 @@ else:
     
     st.sidebar.info(f"Connected: {connection_time}")
     
-    # Test connection button
+    # Show connection details
+    access_token = st.session_state.get("gw_access_token", "")
+    if access_token:
+        masked_token = f"{access_token[:8]}...{access_token[-4:]}"
+        st.sidebar.caption(f"Token: {masked_token}")
+    
+    # Test connection button with enhanced feedback
     if st.sidebar.button("🧪 Test Connection", use_container_width=True):
         with st.spinner("Testing API connection..."):
-            # Try to fetch a test symbol
-            test_data = bot.data_feed.get_live_data("RELIANCE")
-            if test_data:
-                st.sidebar.success("✅ API connection working!")
-                st.sidebar.json({
-                    "Symbol": "RELIANCE",
-                    "Price": f"₹{test_data['price']:.2f}",
-                    "Volume": f"{test_data['volume']:,}",
-                    "Timestamp": test_data['timestamp'].strftime("%H:%M:%S")
-                })
-            else:
-                st.sidebar.error("❌ API connection failed")
+            try:
+                # Test basic API call
+                test_data = bot.data_feed.get_live_data("RELIANCE")
+                if test_data:
+                    st.sidebar.success("✅ API connection working!")
+                    st.sidebar.json({
+                        "Symbol": "RELIANCE",
+                        "Price": f"₹{test_data['price']:.2f}",
+                        "Volume": f"{test_data['volume']:,}",
+                        "Timestamp": test_data['timestamp'].strftime("%H:%M:%S")
+                    })
+                else:
+                    st.sidebar.error("❌ API connection failed")
+            except Exception as e:
+                st.sidebar.error(f"❌ Test failed: {e}")
     
     if st.sidebar.button("🚪 Logout", use_container_width=True):
         bot.data_feed.logout()
@@ -897,7 +1189,7 @@ else:
         st.session_state.oauth_step = 1
         st.session_state.oauth_api_key = ""
         st.session_state.oauth_api_secret = ""
-        st.session_state.oauth_login_url = ""
+        st.session_state.oauth_login_urls = []
         
         st.success("✅ Logged out successfully")
         st.rerun()
@@ -1390,20 +1682,20 @@ with st.sidebar.expander("❓ OAuth Help & Troubleshooting", expanded=False):
     - System validates and prepares OAuth flow
     
     **Step 2: Login to Goodwill**
-    - Click the generated login link
+    - Try multiple login URLs provided
     - Login with Goodwill User ID + Password + OTP
     - You'll be redirected back with request_token
     
     **Step 3: Complete OAuth**
-    - Copy the request_token from URL
-    - Paste it and click "Complete Login"
-    - System exchanges token for access_token
+    - Copy the request_token from URL OR paste entire URL
+    - System will extract token automatically
+    - Click "Complete Login" to exchange for access_token
     """)
     
     st.markdown("### **Common Issues:**")
     st.markdown("""
     **❌ No request_token in URL:**
-    - Ensure you clicked login link from Step 2
+    - Try different login URLs from Step 2
     - Complete full Goodwill login process
     - Check redirect URL format
     
@@ -1414,6 +1706,7 @@ with st.sidebar.expander("❓ OAuth Help & Troubleshooting", expanded=False):
     **❌ Token exchange fails:**
     - Check request_token format (no extra characters)
     - Try the process again from Step 1
+    - Check debug info for detailed error messages
     """)
     
     st.markdown("### **Expected URL Format:**")
@@ -1421,8 +1714,10 @@ with st.sidebar.expander("❓ OAuth Help & Troubleshooting", expanded=False):
 # After successful login, you should see:
 http://localhost:8501/?request_token=ABC123XYZ&status=success
 
-# Copy only this part:
-ABC123XYZ
+# OR:
+http://localhost:8501/?code=ABC123XYZ&state=trading_bot_auth
+
+# Copy either the token value OR the entire URL
     """)
 
 # ==================== DEBUG OAUTH STATE ====================
@@ -1433,18 +1728,35 @@ if st.sidebar.checkbox("🔍 Debug OAuth State"):
         "Current Step": st.session_state.get('oauth_step', 'Not Set'),
         "API Key Stored": bool(st.session_state.get('oauth_api_key', '')),
         "API Secret Stored": bool(st.session_state.get('oauth_api_secret', '')),
-        "Login URL Generated": bool(st.session_state.get('oauth_login_url', '')),
+        "Login URLs Generated": bool(st.session_state.get('oauth_login_urls', [])),
         "Currently Logged In": st.session_state.gw_logged_in,
-        "Connection Status": bot.data_feed.is_connected
+        "Connection Status": bot.data_feed.is_connected,
+        "Session State Keys": list(st.session_state.keys())
     }
     st.sidebar.json(debug_oauth)
+    
+    # Show current URL parameters
+    query_params = st.experimental_get_query_params()
+    if query_params:
+        st.sidebar.markdown("**Current URL Parameters:**")
+        st.sidebar.json(query_params)
+        
+        # Check if there's a token in current URL
+        for param in ['request_token', 'code', 'authorization_code', 'token']:
+            if param in query_params:
+                token_value = query_params[param][0]
+                st.sidebar.success(f"✅ Found {param} in URL: {token_value[:10]}...")
+                
+                # Auto-fill if user is on step 3
+                if st.session_state.get('oauth_step') == 3:
+                    st.sidebar.info("💡 You can copy this token to Step 3!")
     
     # Reset OAuth state button
     if st.sidebar.button("🔄 Reset OAuth State", use_container_width=True):
         st.session_state.oauth_step = 1
         st.session_state.oauth_api_key = ""
         st.session_state.oauth_api_secret = ""
-        st.session_state.oauth_login_url = ""
+        st.session_state.oauth_login_urls = []
         st.sidebar.success("OAuth state reset!")
         st.rerun()
 
@@ -1466,7 +1778,7 @@ with col_footer2:
         st.caption("🔵 Not Connected to Broker")
 
 with col_footer3:
-    st.caption(f"Version 3.0 | OAuth Flow | Adaptive Algorithm")
+    st.caption(f"Version 3.0 | Enhanced OAuth Flow | Adaptive Algorithm")
 
 # Info message when bot is stopped
 if not bot.is_running:
@@ -1477,4 +1789,40 @@ if not bot.is_running:
     else:
         st.info("💡 **Bot is ready! Click 'Start Bot' to begin trading with Goodwill live data via OAuth.**")
 
-# ==================== END OF COMPLETE APPLICATION ==================== 
+# ==================== URL PARAMETER AUTO-DETECTION ====================
+
+# Auto-detect tokens in URL and show helpful message
+try:
+    query_params = st.experimental_get_query_params()
+    if query_params and not st.session_state.gw_logged_in:
+        for param in ['request_token', 'code', 'authorization_code', 'token']:
+            if param in query_params:
+                token_value = query_params[param][0]
+                
+                # Show prominent message about detected token
+                st.success(f"🎯 **Token Detected!** Found `{param}` in URL: `{token_value[:10]}...`")
+                st.info("💡 **Next Step:** Go to the sidebar OAuth section, proceed to Step 3, and paste this token!")
+                
+                # Auto-advance to step 3 if credentials are already stored
+                if (st.session_state.get('oauth_api_key') and 
+                    st.session_state.get('oauth_api_secret') and 
+                    st.session_state.get('oauth_step') != 3):
+                    st.session_state.oauth_step = 3
+                    st.rerun()
+                
+                break
+except:
+    # Fallback for older Streamlit versions
+    pass
+
+# ==================== END OF COMPLETE APPLICATION ====================
+
+# Performance optimization: Clear old cache entries
+if len(bot.volatility_cache) > 100:
+    # Keep only the most recent 50 entries
+    symbols_to_keep = list(bot.volatility_cache.keys())[-50:]
+    bot.volatility_cache = {k: v for k, v in bot.volatility_cache.items() if k in symbols_to_keep}
+
+if len(bot.momentum_cache) > 100:
+    symbols_to_keep = list(bot.momentum_cache.keys())[-50:]
+    bot.momentum_cache = {k: v for k, v in bot.momentum_cache.items() if k in symbols_to_keep}
