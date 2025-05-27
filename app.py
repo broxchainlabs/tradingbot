@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """
-FlyingBuddha Scalping Bot - Goodwill Only Version
-High-frequency scalping with dynamic entry/exit and adaptive stop loss
+FlyingBuddha Scalping Bot - Goodwill OAuth Flow
+High-frequency scalping with proper Goodwill OAuth authentication
 - Per trade risk: 15%
-- Max 4 positions
+- Max 4 positions  
 - 2-3 min max hold time
 - Dynamic/adaptive stop loss
 - Risk:Reward 1:2
 - Dynamic entry logic
-- Uses Goodwill data for both Paper and Live modes
 """
 
 import streamlit as st
@@ -17,6 +16,7 @@ import pandas as pd
 import numpy as np
 import time
 import json
+import hashlib
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 import sqlite3
@@ -44,176 +44,166 @@ st.set_page_config(
 
 # ==================== CORE CLASSES ====================
 
-class GoodwillDataFeed:
-    """Goodwill-specific data feed with proper login flow"""
+class GoodwillOAuthHandler:
+    """Handles Goodwill OAuth authentication flow"""
     
     def __init__(self):
         self.session = None
         self.access_token = None
-        self.refresh_token = None
         self.api_key = None
+        self.api_secret = None
         self.is_connected = False
+        self.client_id = None
         self.instrument_token_map = {}
-        self.data_cache = {}
         self.last_login_time = None
         
-    def login(self, user_id, password, totp, api_key, imei=None):
-        """Complete Goodwill login flow"""
+    def generate_signature(self, api_key, request_token, api_secret):
+        """Generate SHA-256 signature for Goodwill API"""
+        checksum = f"{api_key}{request_token}{api_secret}"
+        signature = hashlib.sha256(checksum.encode()).hexdigest()
+        return signature
+    
+    def get_login_url(self, api_key):
+        """Generate Goodwill login URL"""
+        self.api_key = api_key
+        return f"https://api.gwcindia.in/v1/login?api_key={api_key}"
+    
+    def exchange_token(self, api_key, request_token, api_secret):
+        """Exchange request_token for access_token"""
         if not REQUESTS_IMPORTED:
-            st.error("❌ requests library required for Goodwill connection")
+            st.error("❌ requests library required")
             return False
-            
+        
         try:
             self.api_key = api_key
-            if not imei:
-                imei = str(uuid.uuid4())
-                
-            login_url = "https://api.gwcindia.in/v1/auth/login"
-            login_payload = {
-                "userId": user_id,
-                "password": password,
-                "totp": totp,
-                "vendorKey": api_key,
-                "imei": imei
+            self.api_secret = api_secret
+            
+            # Generate signature
+            signature = self.generate_signature(api_key, request_token, api_secret)
+            
+            # Exchange token
+            url = "https://api.gwcindia.in/v1/login-response"
+            payload = {
+                "api_key": api_key,
+                "request_token": request_token,
+                "signature": signature
             }
             
             headers = {"Content-Type": "application/json"}
-            response = requests.post(login_url, headers=headers, json=login_payload, timeout=10)
+            response = requests.post(url, json=payload, headers=headers, timeout=10)
             response.raise_for_status()
-            login_data = response.json()
             
-            if login_data.get("status") == "success" and "data" in login_data:
-                self.session = requests.Session()
-                self.access_token = login_data["data"]["accessToken"]
-                self.refresh_token = login_data["data"].get("refreshToken")
-                
-                self.session.headers.update({
-                    "x-api-key": api_key,
-                    "Authorization": f"Bearer {self.access_token}"
-                })
-                
+            data = response.json()
+            
+            if data.get("status") == "success" and "data" in data:
+                self.access_token = data["data"]["access_token"]
+                self.client_id = data["data"]["clnt_id"]
                 self.is_connected = True
                 self.last_login_time = datetime.now()
                 
-                # Store login info in session state
+                # Store in session state
                 st.session_state["gw_logged_in"] = True
-                st.session_state["gw_user_id"] = user_id
+                st.session_state["gw_access_token"] = self.access_token
+                st.session_state["gw_client_id"] = self.client_id
                 st.session_state["gw_api_key"] = api_key
-                st.session_state["gw_imei"] = imei
                 
+                self.setup_session()
                 self.load_instrument_tokens()
                 return True
             else:
-                st.error(f"❌ Login Failed: {login_data.get('message', 'Unknown error')}")
+                st.error(f"❌ Token exchange failed: {data.get('error_msg', 'Unknown error')}")
                 return False
                 
         except requests.exceptions.RequestException as e:
-            st.error(f"❌ Login Request Error: {e}")
+            st.error(f"❌ Request error: {e}")
             return False
         except Exception as e:
-            st.error(f"❌ Login Error: {e}")
+            st.error(f"❌ Token exchange error: {e}")
             return False
     
-    def logout(self):
-        """Logout and clear session"""
-        self.session = None
-        self.access_token = None
-        self.refresh_token = None
-        self.is_connected = False
-        
-        # Clear session state
-        for key in ["gw_logged_in", "gw_user_id", "gw_api_key", "gw_imei"]:
-            if key in st.session_state:
-                del st.session_state[key]
-    
-    def refresh_token_if_needed(self):
-        """Auto-refresh token if expired"""
-        if not self.refresh_token or not self.session:
-            return False
-            
-        try:
-            refresh_url = "https://api.gwcindia.in/v1/auth/refresh-token"
-            headers = {"Content-Type": "application/json", "x-api-key": self.api_key}
-            payload = {"refreshToken": self.refresh_token}
-            
-            response = requests.post(refresh_url, headers=headers, json=payload, timeout=10)
-            response.raise_for_status()
-            refresh_data = response.json()
-            
-            if refresh_data.get("status") == "success" and "data" in refresh_data:
-                self.access_token = refresh_data["data"]["accessToken"]
-                if "refreshToken" in refresh_data["data"]:
-                    self.refresh_token = refresh_data["data"]["refreshToken"]
-                    
-                self.session.headers.update({"Authorization": f"Bearer {self.access_token}"})
-                return True
-            return False
-        except Exception as e:
-            print(f"Token refresh error: {e}")
-            return False
+    def setup_session(self):
+        """Setup requests session with headers"""
+        self.session = requests.Session()
+        self.session.headers.update({
+            "x-api-key": self.api_key,
+            "Authorization": f"Bearer {self.access_token}",
+            "Content-Type": "application/json"
+        })
     
     def load_instrument_tokens(self):
         """Load instrument tokens for trading symbols"""
         symbols = [
-            "HDFCBANK", "ICICIBANK", "SBIN", "KOTAKBANK", "AXISBANK", 
+            "HDFCBANK", "ICICIBANK", "SBIN", "KOTAKBANK", "AXISBANK",
             "BAJFINANCE", "RELIANCE", "INFY", "TCS", "ADANIPORTS"
         ]
         
-        # Create dummy tokens for now - replace with actual API call
-        for i, symbol in enumerate(symbols, 1000):
-            self.instrument_token_map[f"{symbol}_NSE"] = str(i)
+        # For now, we'll fetch tokens dynamically when needed
+        # This is more efficient than pre-loading all symbols
+        st.success(f"✅ Ready to trade {len(symbols)} symbols")
+    
+    def get_instrument_token(self, symbol):
+        """Get instrument token for a symbol"""
+        if symbol in self.instrument_token_map:
+            return self.instrument_token_map[symbol]
         
-        st.success(f"✅ Loaded {len(self.instrument_token_map)} instrument tokens")
+        # Fetch token dynamically
+        try:
+            response = self.session.post(
+                "https://api.gwcindia.in/v1/fetchsymbol",
+                json={"s": symbol},
+                timeout=10
+            )
+            response.raise_for_status()
+            data = response.json()
+            
+            if data.get("status") == "success" and data.get("data"):
+                for item in data["data"]:
+                    if item["exchange"] == "NSE" and symbol.upper() in item["symbol"]:
+                        token = item["token"]
+                        self.instrument_token_map[symbol] = token
+                        return token
+            return None
+            
+        except Exception as e:
+            print(f"Error fetching token for {symbol}: {e}")
+            return None
     
-    def get_instrument_token(self, symbol, exchange="NSE"):
-        """Get instrument token for symbol"""
-        key = f"{symbol.upper()}_{exchange.upper()}"
-        return self.instrument_token_map.get(key)
-    
-    def place_order(self, symbol, action, quantity, price, order_type="LIMIT"):
+    def place_order(self, symbol, action, quantity, price, order_type="MKT"):
         """Place order through Goodwill API"""
         if not self.is_connected or not self.session:
             st.error("❌ Not connected to Goodwill")
             return None
-            
+        
         try:
-            instrument_token = self.get_instrument_token(symbol)
-            if not instrument_token:
-                st.error(f"❌ Instrument token not found for {symbol}")
-                return None
-            
-            order_url = "https://api.gwcindia.in/v1/orders"
-            order_payload = {
+            # Prepare order payload
+            payload = {
+                "tsym": f"{symbol}-EQ",
                 "exchange": "NSE",
-                "token": instrument_token,
-                "tradingsymbol": symbol,
-                "quantity": int(quantity),
-                "price": float(price),
-                "orderType": order_type,
-                "productType": "MIS",
-                "transactionType": action.upper(),
-                "priceType": "DAY",
-                "variety": "REGULAR"
+                "trantype": action.upper(),
+                "validity": "DAY",
+                "pricetype": order_type,
+                "qty": str(quantity),
+                "discqty": "0",
+                "price": str(price) if order_type != "MKT" else "0",
+                "trgprc": "0",
+                "product": "MIS",
+                "amo": "NO"
             }
             
-            response = self.session.post(order_url, json=order_payload, timeout=10)
-            
-            if response.status_code == 401:  # Token expired
-                if self.refresh_token_if_needed():
-                    response = self.session.post(order_url, json=order_payload, timeout=10)
-                else:
-                    st.error("❌ Token refresh failed")
-                    return None
-            
+            response = self.session.post(
+                "https://api.gwcindia.in/v1/placeorder",
+                json=payload,
+                timeout=10
+            )
             response.raise_for_status()
-            order_data = response.json()
+            data = response.json()
             
-            if order_data.get("status") == "success" and "data" in order_data:
-                order_id = order_data["data"]["orderId"]
+            if data.get("status") == "success" and "data" in data:
+                order_id = data["data"]["nstordno"]
                 st.success(f"🎯 Order Placed: {action} {quantity} {symbol} @ ₹{price:.2f} | ID: {order_id}")
                 return order_id
             else:
-                st.error(f"❌ Order Failed: {order_data.get('message', 'Unknown error')}")
+                st.error(f"❌ Order Failed: {data.get('error_msg', 'Unknown error')}")
                 return None
                 
         except Exception as e:
@@ -224,30 +214,24 @@ class GoodwillDataFeed:
         """Get live market data for symbol"""
         if not self.is_connected or not self.session:
             return None
-            
+        
         try:
-            instrument_token = self.get_instrument_token(symbol)
-            if not instrument_token:
+            token = self.get_instrument_token(symbol)
+            if not token:
                 return None
             
-            # Get live quote
-            quotes_url = "https://api.gwcindia.in/v1/market/quotes"
-            quotes_payload = {"symbols": [{"exchange": "NSE", "token": instrument_token}]}
-            
-            response = self.session.post(quotes_url, json=quotes_payload, timeout=10)
-            if response.status_code == 401:
-                if self.refresh_token_if_needed():
-                    response = self.session.post(quotes_url, json=quotes_payload, timeout=10)
-                else:
-                    return None
-            
+            response = self.session.post(
+                "https://api.gwcindia.in/v1/getquote",
+                json={"exchange": "NSE", "token": token},
+                timeout=10
+            )
             response.raise_for_status()
-            quotes_data = response.json()
+            data = response.json()
             
-            if quotes_data.get("status") == "success" and quotes_data.get("data"):
-                quote = quotes_data["data"][0]
+            if data.get("status") == "success" and "data" in data:
+                quote = data["data"]
                 return {
-                    'price': float(quote.get("ltp", 0)),
+                    'price': float(quote.get("last_price", 0)),
                     'volume': int(quote.get("volume", 0)),
                     'high': float(quote.get("high", 0)),
                     'low': float(quote.get("low", 0)),
@@ -258,13 +242,30 @@ class GoodwillDataFeed:
         except Exception as e:
             print(f"Data fetch error for {symbol}: {e}")
             return None
+    
+    def logout(self):
+        """Logout and clear session"""
+        if self.session:
+            try:
+                self.session.get("https://api.gwcindia.in/v1/logout", timeout=5)
+            except:
+                pass
+        
+        self.session = None
+        self.access_token = None
+        self.is_connected = False
+        
+        # Clear session state
+        for key in ["gw_logged_in", "gw_access_token", "gw_client_id", "gw_api_key"]:
+            if key in st.session_state:
+                del st.session_state[key]
 
 
 class AdaptiveScalpingBot:
     """Advanced scalping bot with adaptive algorithms"""
     
     def __init__(self):
-        self.data_feed = GoodwillDataFeed()
+        self.data_feed = GoodwillOAuthHandler()
         self.is_running = False
         self.capital = 100000.0
         self.positions = {}
@@ -469,9 +470,10 @@ class AdaptiveScalpingBot:
             if self.mode == "LIVE":
                 order_id = self.data_feed.place_order(symbol, action, quantity, entry_price)
             else:
-                # Paper mode - simulate order but use real broker data
+                # Paper mode - simulate order but use real broker data if available
                 order_id = f"PAPER_{int(datetime.now().timestamp())}"
-                st.info(f"📝 PAPER TRADE: {action} {quantity} {symbol} @ ₹{entry_price:.2f} (Using Goodwill Data)")
+                data_source = "Goodwill Data" if self.data_feed.is_connected else "yfinance Data"
+                st.info(f"📝 PAPER TRADE: {action} {quantity} {symbol} @ ₹{entry_price:.2f} (Using {data_source})")
             
             if order_id:
                 position_id = f"{symbol}_{int(datetime.now().timestamp())}"
@@ -509,8 +511,6 @@ class AdaptiveScalpingBot:
             current_pnl = (current_price - position['entry_price']) * position['quantity']
         else:
             current_pnl = (position['entry_price'] - current_price) * position['quantity']
-        
-        
         
         position['highest_profit'] = max(position['highest_profit'], current_pnl)
         position['lowest_profit'] = min(position['lowest_profit'], current_pnl)
@@ -592,7 +592,8 @@ class AdaptiveScalpingBot:
         if self.mode == "LIVE":
             self.data_feed.place_order(position['symbol'], exit_action, position['quantity'], exit_price)
         else:
-            st.info(f"📝 PAPER EXIT: {exit_action} {position['quantity']} {position['symbol']} @ ₹{exit_price:.2f} (Using Goodwill Data)")
+            data_source = "Goodwill Data" if self.data_feed.is_connected else "yfinance Data"
+            st.info(f"📝 PAPER EXIT: {exit_action} {position['quantity']} {position['symbol']} @ ₹{exit_price:.2f} (Using {data_source})")
         
         st.info(f"✅ Position Closed: {position['symbol']} | P&L: ₹{pnl:.2f} | Reason: {exit_reason}")
     
@@ -686,7 +687,7 @@ mode_col1, mode_col2 = st.sidebar.columns(2)
 with mode_col1:
     if st.button("🟠 Paper Mode"):
         bot.mode = "PAPER"
-        st.success("✅ Switched to Paper Trading (Broker Data)")
+        st.success("✅ Switched to Paper Trading")
         st.rerun()
 
 with mode_col2:
@@ -698,39 +699,65 @@ with mode_col2:
             st.success("✅ Switched to Live Trading Mode")
         st.rerun()
 
-# ==================== GOODWILL LOGIN (SIDEBAR) ====================
+# ==================== GOODWILL OAUTH LOGIN ====================
 
-st.sidebar.subheader("🔐 Goodwill Login")
+st.sidebar.subheader("🔐 Goodwill OAuth Login")
 
 if not st.session_state.gw_logged_in:
-    with st.sidebar.form("gw_login_form"):
-        st.markdown("**Enter Goodwill Credentials:**")
+    st.sidebar.markdown("**Step 1: Enter API Credentials**")
+    
+    api_key = st.sidebar.text_input(
+        "API Key", 
+        type="password",
+        help="Your Goodwill API Key from developer portal"
+    )
+    
+    api_secret = st.sidebar.text_input(
+        "API Secret", 
+        type="password",
+        help="Your Goodwill API Secret from developer portal"
+    )
+    
+    if api_key:
+        login_url = bot.data_feed.get_login_url(api_key)
         
-        user_id = st.text_input("User ID", key="gw_user_input")
-        password = st.text_input("Password", type="password", key="gw_pass_input")
-        api_key = st.text_input("API Key (Vendor Key)", type="password", key="gw_api_input")
-        totp = st.text_input("TOTP (6 digits)", max_chars=6, key="gw_totp_input")
-        imei = st.text_input("IMEI (Optional)", key="gw_imei_input", 
-                           help="Leave blank for auto-generation")
+        st.sidebar.markdown("**Step 2: Login to Goodwill**")
+        st.sidebar.markdown(f"[🚀 **Click Here to Login**]({login_url})")
+        st.sidebar.caption("This will open Goodwill login page")
         
-        login_submitted = st.form_submit_button("🚀 Login to Goodwill", use_container_width=True)
+        st.sidebar.markdown("**Step 3: Enter Request Token**")
+        st.sidebar.info("After login, copy the 'request_token' from URL")
         
-        if login_submitted:
-            if user_id and password and api_key and totp:
-                with st.spinner("Logging in to Goodwill..."):
-                    success = bot.data_feed.login(user_id, password, totp, api_key, imei or None)
+        request_token = st.sidebar.text_input(
+            "Request Token",
+            help="Copy from URL after successful login"
+        )
+        
+        if st.sidebar.button("🔗 Complete Login", use_container_width=True):
+            if api_key and api_secret and request_token:
+                with st.spinner("Exchanging tokens..."):
+                    success = bot.data_feed.exchange_token(api_key, request_token, api_secret)
                     if success:
-                        st.success("✅ Successfully logged in!")
+                        st.success("✅ Successfully logged in to Goodwill!")
                         time.sleep(1)
                         st.rerun()
             else:
-                st.error("❌ Please fill in all required fields")
+                st.error("❌ Please fill in all fields")
     
-    st.sidebar.info("💡 Login required for both Paper & Live trading")
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("**📋 Login Instructions:**")
+    st.sidebar.markdown("""
+    1. Enter your **API Key** and **API Secret**
+    2. Click the **Login** link to open Goodwill
+    3. Login with **User ID + Password + OTP**
+    4. Copy the **request_token** from URL
+    5. Paste it back here and click **Complete Login**
+    """)
+    
 else:
     # Show logged in status
-    user_id = st.session_state.get("gw_user_id", "Unknown")
-    st.sidebar.success(f"✅ Logged in as: {user_id}")
+    client_id = st.session_state.get("gw_client_id", "Unknown")
+    st.sidebar.success(f"✅ Logged in as: {client_id}")
     
     connection_time = ""
     if bot.data_feed.last_login_time:
@@ -1112,8 +1139,8 @@ with connection_col1:
 
 with connection_col2:
     if st.session_state.gw_logged_in:
-        user_id = st.session_state.get("gw_user_id", "Unknown")
-        st.info(f"**User:** {user_id}")
+        client_id = st.session_state.get("gw_client_id", "Unknown")
+        st.info(f"**Client:** {client_id}")
     else:
         st.warning("**Status:** Not logged in")
 
@@ -1204,10 +1231,26 @@ if st.sidebar.checkbox("🔍 Debug Info"):
         "Data Feed Status": {
             "Has Session": bot.data_feed.session is not None,
             "Has Token": bot.data_feed.access_token is not None,
-            "Token Length": len(bot.data_feed.access_token) if bot.data_feed.access_token else 0
+            "Token Length": len(bot.data_feed.access_token) if bot.data_feed.access_token else 0,
+            "Client ID": st.session_state.get("gw_client_id", "None")
         }
     }
     st.sidebar.json(debug_info)
+
+# ==================== OAUTH HELP SECTION ====================
+
+with st.sidebar.expander("❓ OAuth Help", expanded=False):
+    st.markdown("**How to get API credentials:**")
+    st.markdown("1. Go to [developer.gwcindia.in](https://developer.gwcindia.in)")
+    st.markdown("2. Register/Login to get API Key & Secret")
+    st.markdown("3. Set redirect URL to: `http://localhost:8501`")
+    
+    st.markdown("**Login process:**")
+    st.markdown("1. Enter API Key & Secret")
+    st.markdown("2. Click login link")
+    st.markdown("3. Login with User ID + Password + OTP")
+    st.markdown("4. Copy request_token from URL")
+    st.markdown("5. Paste here and complete login")
 
 # ==================== FOOTER ====================
 
@@ -1227,15 +1270,15 @@ with col_footer2:
         st.caption("🔵 Not Connected to Broker")
 
 with col_footer3:
-    st.caption(f"Version 2.0 | Adaptive Scalping Algorithm")
+    st.caption(f"Version 3.0 | OAuth Flow | Adaptive Algorithm")
 
 # Info message when bot is stopped
 if not bot.is_running:
     if not st.session_state.gw_logged_in:
-        st.info("💡 **Please login to Goodwill first, then configure settings and click 'Start Bot' to begin trading.**")
+        st.info("💡 **Please complete Goodwill OAuth login first, then configure settings and click 'Start Bot' to begin trading.**")
     elif not bot.data_feed.is_connected:
-        st.warning("⚠️ **Connection to Goodwill failed. Please check credentials and try logging in again.**")
+        st.warning("⚠️ **Connection to Goodwill failed. Please try the OAuth login process again.**")
     else:
-        st.info("💡 **Bot is ready! Click 'Start Bot' to begin trading with Goodwill live data.**")
+        st.info("💡 **Bot is ready! Click 'Start Bot' to begin trading with Goodwill live data via OAuth.**")
 
 # ==================== END OF COMPLETE APPLICATION ====================
