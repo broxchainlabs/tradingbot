@@ -2,6 +2,13 @@
 """
 FlyingBuddha Scalping Bot - Goodwill Only Version
 High-frequency scalping with dynamic entry/exit and adaptive stop loss
+- Per trade risk: 15%
+- Max 4 positions
+- 2-3 min max hold time
+- Dynamic/adaptive stop loss
+- Risk:Reward 1:2
+- Dynamic entry logic
+- Uses Goodwill data for both Paper and Live modes
 """
 
 import streamlit as st
@@ -90,8 +97,9 @@ class GoodwillDataFeed:
                 
                 # Store login info in session state
                 st.session_state["gw_logged_in"] = True
-                st.session_state["gw_access_token"] = self.access_token
+                st.session_state["gw_user_id"] = user_id
                 st.session_state["gw_api_key"] = api_key
+                st.session_state["gw_imei"] = imei
                 
                 self.load_instrument_tokens()
                 return True
@@ -114,12 +122,9 @@ class GoodwillDataFeed:
         self.is_connected = False
         
         # Clear session state
-        if "gw_logged_in" in st.session_state:
-            del st.session_state["gw_logged_in"]
-        if "gw_access_token" in st.session_state:
-            del st.session_state["gw_access_token"]
-        if "gw_api_key" in st.session_state:
-            del st.session_state["gw_api_key"]
+        for key in ["gw_logged_in", "gw_user_id", "gw_api_key", "gw_imei"]:
+            if key in st.session_state:
+                del st.session_state[key]
     
     def refresh_token_if_needed(self):
         """Auto-refresh token if expired"""
@@ -141,7 +146,6 @@ class GoodwillDataFeed:
                     self.refresh_token = refresh_data["data"]["refreshToken"]
                     
                 self.session.headers.update({"Authorization": f"Bearer {self.access_token}"})
-                st.session_state["gw_access_token"] = self.access_token
                 return True
             return False
         except Exception as e:
@@ -150,7 +154,6 @@ class GoodwillDataFeed:
     
     def load_instrument_tokens(self):
         """Load instrument tokens for trading symbols"""
-        # Placeholder - implement based on Goodwill's actual API
         symbols = [
             "HDFCBANK", "ICICIBANK", "SBIN", "KOTAKBANK", "AXISBANK", 
             "BAJFINANCE", "RELIANCE", "INFY", "TCS", "ADANIPORTS"
@@ -268,6 +271,7 @@ class AdaptiveScalpingBot:
         self.trades = []
         self.signals = []
         self.pnl = 0.0
+        self.mode = "PAPER"  # PAPER or LIVE
         
         # Trading parameters
         self.max_positions = 4
@@ -315,17 +319,14 @@ class AdaptiveScalpingBot:
     def calculate_dynamic_volatility(self, symbol):
         """Calculate adaptive volatility measure"""
         try:
-            # Use yfinance for historical volatility calculation
             ticker = yf.Ticker(f"{symbol}.NS")
             data = ticker.history(period="5d", interval="1m")
             
             if len(data) < 20:
-                return 0.02  # Default 2% volatility
+                return 0.02
             
             returns = data['Close'].pct_change().dropna()
             volatility = returns.rolling(window=20).std().iloc[-1]
-            
-            # Scale to reasonable range (0.5% to 5%)
             volatility = max(0.005, min(0.05, volatility))
             self.volatility_cache[symbol] = volatility
             return volatility
@@ -343,24 +344,15 @@ class AdaptiveScalpingBot:
             if len(data) < 15:
                 return 0
             
-            # Calculate momentum across different timeframes
             current_price = data['Close'].iloc[-1]
-            
-            # 1-minute momentum
             mom_1m = ((current_price - data['Close'].iloc[-2]) / data['Close'].iloc[-2]) * 100
-            
-            # 5-minute momentum
             mom_5m = ((current_price - data['Close'].iloc[-6]) / data['Close'].iloc[-6]) * 100 if len(data) >= 6 else 0
-            
-            # 15-minute momentum
             mom_15m = ((current_price - data['Close'].iloc[-16]) / data['Close'].iloc[-16]) * 100 if len(data) >= 16 else 0
             
-            # Volume-weighted momentum
             recent_volume = data['Volume'].tail(5).mean()
             avg_volume = data['Volume'].mean()
             volume_factor = min(recent_volume / avg_volume, 3.0) if avg_volume > 0 else 1.0
             
-            # Composite momentum score
             momentum_score = (mom_1m * 0.5 + mom_5m * 0.3 + mom_15m * 0.2) * volume_factor
             
             self.momentum_cache[symbol] = {
@@ -382,20 +374,34 @@ class AdaptiveScalpingBot:
         
         for symbol in self.symbols:
             try:
-                # Get live data
-                live_data = self.data_feed.get_live_data(symbol)
+                # Always use broker data feed if connected
+                if self.data_feed.is_connected:
+                    live_data = self.data_feed.get_live_data(symbol)
+                else:
+                    # Fallback to yfinance only if broker not connected
+                    ticker = yf.Ticker(f"{symbol}.NS")
+                    hist = ticker.history(period="1d", interval="1m")
+                    if len(hist) > 0:
+                        latest = hist.iloc[-1]
+                        live_data = {
+                            'price': float(latest['Close']),
+                            'volume': int(latest['Volume']),
+                            'high': float(latest['High']),
+                            'low': float(latest['Low']),
+                            'timestamp': datetime.now()
+                        }
+                    else:
+                        continue
+                
                 if not live_data:
                     continue
                 
-                # Calculate adaptive metrics
                 volatility = self.calculate_dynamic_volatility(symbol)
                 momentum = self.calculate_momentum_score(symbol)
                 
-                # Dynamic entry thresholds based on volatility
-                min_momentum_threshold = volatility * 50  # Scale with volatility
+                min_momentum_threshold = volatility * 50
                 volume_threshold = 1.5
                 
-                # Check entry conditions
                 momentum_data = self.momentum_cache.get(symbol, {})
                 strength = momentum_data.get('strength', 0)
                 volume_factor = momentum_data.get('volume_factor', 1)
@@ -420,27 +426,22 @@ class AdaptiveScalpingBot:
                 print(f"Scanning error for {symbol}: {e}")
                 continue
         
-        # Sort by score and return top opportunities
         opportunities.sort(key=lambda x: x['score'], reverse=True)
-        return opportunities[:3]  # Top 3 opportunities
+        return opportunities[:3]
     
     def calculate_position_size(self, symbol, entry_price, volatility):
         """Calculate adaptive position size based on volatility and risk"""
         try:
-            # Risk amount per trade (15% of capital)
             risk_amount = self.capital * self.risk_per_trade
-            
-            # Adaptive stop loss based on volatility
-            stop_loss_pct = max(0.002, min(0.01, volatility * 2))  # 0.2% to 1%
+            stop_loss_pct = max(0.002, min(0.01, volatility * 2))
             stop_loss_amount = entry_price * stop_loss_pct
             
-            # Calculate quantity
             if stop_loss_amount > 0:
                 quantity = int(risk_amount / stop_loss_amount)
-                quantity = max(1, min(quantity, 1000))  # Min 1, Max 1000 shares
+                quantity = max(1, min(quantity, 1000))
                 return quantity, stop_loss_pct
             
-            return 1, 0.005  # Fallback
+            return 1, 0.005
             
         except Exception as e:
             print(f"Position size calculation error: {e}")
@@ -454,13 +455,9 @@ class AdaptiveScalpingBot:
             direction = opportunity['direction']
             volatility = opportunity['volatility']
             
-            # Calculate position size and stop loss
             quantity, stop_loss_pct = self.calculate_position_size(symbol, entry_price, volatility)
-            
-            # Determine action
             action = "BUY" if direction > 0 else "SELL"
             
-            # Calculate stop loss and target
             if action == "BUY":
                 stop_loss = entry_price * (1 - stop_loss_pct)
                 target = entry_price * (1 + (stop_loss_pct * self.risk_reward_ratio))
@@ -468,11 +465,15 @@ class AdaptiveScalpingBot:
                 stop_loss = entry_price * (1 + stop_loss_pct)
                 target = entry_price * (1 - (stop_loss_pct * self.risk_reward_ratio))
             
-            # Place order
-            order_id = self.data_feed.place_order(symbol, action, quantity, entry_price)
+            # Place order based on mode
+            if self.mode == "LIVE":
+                order_id = self.data_feed.place_order(symbol, action, quantity, entry_price)
+            else:
+                # Paper mode - simulate order but use real broker data
+                order_id = f"PAPER_{int(datetime.now().timestamp())}"
+                st.info(f"📝 PAPER TRADE: {action} {quantity} {symbol} @ ₹{entry_price:.2f} (Using Goodwill Data)")
             
             if order_id:
-                # Create position
                 position_id = f"{symbol}_{int(datetime.now().timestamp())}"
                 
                 self.positions[position_id] = {
@@ -504,18 +505,15 @@ class AdaptiveScalpingBot:
         """Update trailing and adaptive stop losses"""
         position = self.positions[position_id]
         
-        # Calculate current P&L
         if position['action'] == 'BUY':
             current_pnl = (current_price - position['entry_price']) * position['quantity']
         else:
             current_pnl = (position['entry_price'] - current_price) * position['quantity']
-                # Update profit tracking
+        
         position['highest_profit'] = max(position['highest_profit'], current_pnl)
         position['lowest_profit'] = min(position['lowest_profit'], current_pnl)
         
-        # Adaptive trailing stop based on profit
-        if current_pnl > 0:  # In profit
-            # Trail stop loss to lock in profits
+        if current_pnl > 0:
             trail_factor = min(0.5, current_pnl / (position['entry_price'] * position['quantity'] * 0.01))
             
             if position['action'] == 'BUY':
@@ -529,15 +527,12 @@ class AdaptiveScalpingBot:
         """Check dynamic exit conditions"""
         position = self.positions[position_id]
         
-        # Time-based exit
         hold_time = (datetime.now() - position['entry_time']).total_seconds()
         if hold_time > self.max_hold_time:
             return "TIME_EXIT"
         
-        # Update adaptive stops
         self.update_adaptive_stops(position_id, current_price)
         
-        # Check stop loss
         if position['action'] == 'BUY':
             if current_price <= position['trailing_stop']:
                 return "STOP_LOSS"
@@ -549,7 +544,6 @@ class AdaptiveScalpingBot:
             if current_price <= position['target']:
                 return "TARGET_HIT"
         
-        # Momentum reversal exit
         momentum_data = self.momentum_cache.get(position['symbol'], {})
         current_direction = momentum_data.get('direction', 0)
         
@@ -567,20 +561,16 @@ class AdaptiveScalpingBot:
         
         position = self.positions.pop(position_id)
         
-        # Calculate P&L
         if position['action'] == 'BUY':
             pnl = (exit_price - position['entry_price']) * position['quantity']
         else:
             pnl = (position['entry_price'] - exit_price) * position['quantity']
         
-        # Update capital and total P&L
         self.capital += pnl
         self.pnl += pnl
         
-        # Calculate hold time
         hold_time = (datetime.now() - position['entry_time']).total_seconds()
         
-        # Log trade
         trade_record = {
             'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             'symbol': position['symbol'],
@@ -595,57 +585,42 @@ class AdaptiveScalpingBot:
         
         self.trades.append(trade_record)
         
-        # Log to database
-        try:
-            cursor = self.conn.cursor()
-            cursor.execute("""
-                INSERT INTO trades 
-                (timestamp, symbol, action, entry_price, exit_price, quantity, pnl, hold_time, exit_reason)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                trade_record['timestamp'], trade_record['symbol'], trade_record['action'],
-                trade_record['entry_price'], trade_record['exit_price'], trade_record['quantity'],
-                trade_record['pnl'], trade_record['hold_time'], trade_record['exit_reason']
-            ))
-            self.conn.commit()
-        except Exception as e:
-            print(f"Database logging error: {e}")
-        
-        # Place exit order
+        # Place exit order based on mode
         exit_action = "SELL" if position['action'] == "BUY" else "BUY"
-        self.data_feed.place_order(position['symbol'], exit_action, position['quantity'], exit_price)
+        if self.mode == "LIVE":
+            self.data_feed.place_order(position['symbol'], exit_action, position['quantity'], exit_price)
+        else:
+            st.info(f"📝 PAPER EXIT: {exit_action} {position['quantity']} {position['symbol']} @ ₹{exit_price:.2f} (Using Goodwill Data)")
         
         st.info(f"✅ Position Closed: {position['symbol']} | P&L: ₹{pnl:.2f} | Reason: {exit_reason}")
     
     def run_trading_cycle(self):
         """Main trading cycle"""
-        if not self.data_feed.is_connected:
-            st.warning("⚠️ Not connected to Goodwill. Please login first.")
-            return
-        
         try:
-            # Scan for new opportunities
             opportunities = self.scan_for_opportunities()
             
-            # Execute entries for top opportunities
             for opp in opportunities:
                 if len(self.positions) < self.max_positions:
                     self.execute_entry(opp)
             
-            # Update existing positions
             positions_to_close = []
             for pos_id in list(self.positions.keys()):
                 position = self.positions[pos_id]
-                live_data = self.data_feed.get_live_data(position['symbol'])
                 
-                if live_data:
-                    current_price = live_data['price']
-                    exit_reason = self.check_exit_conditions(pos_id, current_price)
-                    
-                    if exit_reason:
-                        positions_to_close.append((pos_id, current_price, exit_reason))
+                # Get current price - always use broker data if connected
+                if self.data_feed.is_connected:
+                    live_data = self.data_feed.get_live_data(position['symbol'])
+                    current_price = live_data['price'] if live_data else position['entry_price']
+                else:
+                    # Fallback to yfinance only if broker not connected
+                    ticker = yf.Ticker(f"{position['symbol']}.NS")
+                    hist = ticker.history(period="1d", interval="1m")
+                    current_price = float(hist.iloc[-1]['Close']) if len(hist) > 0 else position['entry_price']
+                
+                exit_reason = self.check_exit_conditions(pos_id, current_price)
+                if exit_reason:
+                    positions_to_close.append((pos_id, current_price, exit_reason))
             
-            # Close positions that meet exit criteria
             for pos_id, exit_price, exit_reason in positions_to_close:
                 self.close_position(pos_id, exit_price, exit_reason)
                 
@@ -656,13 +631,8 @@ class AdaptiveScalpingBot:
         """Calculate performance metrics"""
         if not self.trades:
             return {
-                'total_trades': 0,
-                'win_rate': 0,
-                'total_pnl': 0,
-                'avg_trade': 0,
-                'max_profit': 0,
-                'max_loss': 0,
-                'avg_hold_time': 0
+                'total_trades': 0, 'win_rate': 0, 'total_pnl': 0,
+                'avg_trade': 0, 'max_profit': 0, 'max_loss': 0, 'avg_hold_time': 0
             }
         
         pnls = [trade['pnl'] for trade in self.trades]
@@ -694,81 +664,92 @@ bot = st.session_state.bot
 # Main title
 st.title("⚡ FlyingBuddha Adaptive Scalping Bot")
 
-# ==================== LOGIN FLOW ====================
+# ==================== SIDEBAR CONTROLS ====================
+
+st.sidebar.header("⚡ Scalping Bot Controls")
+
+# Trading Mode Selection
+st.sidebar.subheader("🔄 Trading Mode")
+
+current_mode_icon = "🔴" if bot.mode == "LIVE" else "🟠"
+current_mode_text = f"{current_mode_icon} {bot.mode} Mode"
+if bot.data_feed.is_connected:
+    current_mode_text += " (Connected to Goodwill)"
+else:
+    current_mode_text += " (Not Connected)"
+
+st.sidebar.markdown(f"**Current:** {current_mode_text}")
+
+mode_col1, mode_col2 = st.sidebar.columns(2)
+with mode_col1:
+    if st.button("🟠 Paper Mode"):
+        bot.mode = "PAPER"
+        st.success("✅ Switched to Paper Trading (Broker Data)")
+        st.rerun()
+
+with mode_col2:
+    if st.button("🔴 Live Mode"):
+        bot.mode = "LIVE"
+        if not st.session_state.gw_logged_in:
+            st.warning("⚠️ Please login to Goodwill first!")
+        else:
+            st.success("✅ Switched to Live Trading Mode")
+        st.rerun()
+
+# ==================== GOODWILL LOGIN (SIDEBAR) ====================
+
+st.sidebar.subheader("🔐 Goodwill Login")
 
 if not st.session_state.gw_logged_in:
-    st.markdown("### 🔐 Goodwill Broker Login")
-    
-    with st.form("goodwill_login"):
-        col1, col2 = st.columns(2)
+    with st.sidebar.form("gw_login_form"):
+        st.markdown("**Enter Goodwill Credentials:**")
         
-        with col1:
-            user_id = st.text_input("User ID", placeholder="Enter your Goodwill User ID")
-            password = st.text_input("Password", type="password", placeholder="Enter your password")
+        user_id = st.text_input("User ID", key="gw_user_input")
+        password = st.text_input("Password", type="password", key="gw_pass_input")
+        api_key = st.text_input("API Key (Vendor Key)", type="password", key="gw_api_input")
+        totp = st.text_input("TOTP (6 digits)", max_chars=6, key="gw_totp_input")
+        imei = st.text_input("IMEI (Optional)", key="gw_imei_input", 
+                           help="Leave blank for auto-generation")
         
-        with col2:
-            api_key = st.text_input("API Key (Vendor Key)", type="password", placeholder="Enter API key")
-            totp = st.text_input("TOTP", placeholder="Enter current TOTP", max_chars=6)
+        login_submitted = st.form_submit_button("🚀 Login to Goodwill", use_container_width=True)
         
-        imei = st.text_input("IMEI (Optional)", placeholder="Leave blank for auto-generation")
-        
-        submitted = st.form_submit_button("🚀 Login to Goodwill")
-        
-        if submitted:
+        if login_submitted:
             if user_id and password and api_key and totp:
-                with st.spinner("Logging in..."):
-                    success = bot.data_feed.login(user_id, password, totp, api_key, imei)
+                with st.spinner("Logging in to Goodwill..."):
+                    success = bot.data_feed.login(user_id, password, totp, api_key, imei or None)
                     if success:
-                        st.success("✅ Successfully logged in to Goodwill!")
+                        st.success("✅ Successfully logged in!")
                         time.sleep(1)
                         st.rerun()
-                    else:
-                        st.error("❌ Login failed. Please check your credentials.")
             else:
-                st.error("❌ Please fill in all required fields.")
+                st.error("❌ Please fill in all required fields")
     
-    st.info("💡 Enter your Goodwill credentials to start trading. TOTP is required for each login.")
-    st.stop()
+    st.sidebar.info("💡 Login required for both Paper & Live trading")
+else:
+    # Show logged in status
+    user_id = st.session_state.get("gw_user_id", "Unknown")
+    st.sidebar.success(f"✅ Logged in as: {user_id}")
+    
+    # ==================== CONTINUATION FROM MAIN APP.PY ====================
+# This continues from where the main file was cut off at "connection"
 
-# ==================== MAIN DASHBOARD ====================
-
-# Header with logout option
-col_header1, col_header2, col_header3 = st.columns([3, 1, 1])
-with col_header1:
-    if bot.is_running:
-        st.success("🟢 **BOT ACTIVE** - Adaptive Scalping Mode")
-    else:
-        st.info("⚪ **BOT STOPPED** - Ready to Start")
-
-with col_header2:
-    st.metric("Connected", "✅ Goodwill" if bot.data_feed.is_connected else "❌ Disconnected")
-
-with col_header3:
-    if st.button("🚪 Logout"):
+    connection_time = ""
+    if bot.data_feed.last_login_time:
+        elapsed = datetime.now() - bot.data_feed.last_login_time
+        connection_time = f"{int(elapsed.total_seconds() / 60)}m ago"
+    
+    st.sidebar.info(f"Connected: {connection_time}")
+    
+    if st.sidebar.button("🚪 Logout", use_container_width=True):
         bot.data_feed.logout()
         bot.is_running = False
+        st.success("✅ Logged out successfully")
         st.rerun()
 
-# ==================== CONTROLS ====================
+# ==================== BOT SETTINGS ====================
 
-st.sidebar.header("🎮 Bot Controls")
+st.sidebar.subheader("⚙️ Bot Settings")
 
-# Trading controls
-col_ctrl1, col_ctrl2 = st.sidebar.columns(2)
-with col_ctrl1:
-    if st.button("🚀 Start Bot", disabled=bot.is_running):
-        bot.is_running = True
-        st.success("🚀 Bot Started!")
-        st.rerun()
-
-with col_ctrl2:
-    if st.button("⏹️ Stop Bot", disabled=not bot.is_running):
-        bot.is_running = False
-        st.success("⏹️ Bot Stopped!")
-        st.rerun()
-
-# Settings
-st.sidebar.subheader("⚙️ Settings")
 new_capital = st.sidebar.number_input(
     "Trading Capital (₹)", 
     value=bot.capital, 
@@ -813,6 +794,65 @@ risk_reward = st.sidebar.slider(
     step=0.1
 )
 bot.risk_reward_ratio = risk_reward
+
+# ==================== BOT CONTROL BUTTONS ====================
+
+st.sidebar.subheader("🎮 Bot Control")
+
+# Check if we can start the bot
+can_start = True
+start_button_text = "🚀 Start Bot"
+
+if not st.session_state.gw_logged_in:
+    can_start = False
+    start_button_text = "🔐 Login Required"
+elif not bot.data_feed.is_connected:
+    can_start = False
+    start_button_text = "❌ Connection Failed"
+
+col_ctrl1, col_ctrl2 = st.sidebar.columns(2)
+
+with col_ctrl1:
+    if st.button(start_button_text, disabled=bot.is_running or not can_start, use_container_width=True):
+        bot.is_running = True
+        st.success("🚀 Bot Started!")
+        st.rerun()
+
+with col_ctrl2:
+    if st.button("⏹️ Stop Bot", disabled=not bot.is_running, use_container_width=True):
+        bot.is_running = False
+        st.success("⏹️ Bot Stopped!")
+        st.rerun()
+
+# Bot status display
+st.sidebar.subheader("📊 Status")
+if bot.is_running:
+    if bot.mode == "LIVE": 
+        st.sidebar.error("🔴 LIVE TRADING ACTIVE")
+    else: 
+        st.sidebar.warning("🟠 PAPER TRADING ACTIVE")
+else:
+    st.sidebar.info("⚪ BOT STOPPED")
+
+# Connection status
+if bot.data_feed.is_connected:
+    st.sidebar.success("🔌 Connected to Goodwill")
+else:
+    st.sidebar.error("🔌 Not Connected to Goodwill")
+
+# ==================== MAIN DASHBOARD ====================
+
+# Header with current mode banner
+if bot.mode == "LIVE":
+    if bot.data_feed.is_connected:
+        st.error("🔴 **LIVE TRADING ACTIVE** | Connected to Goodwill | ⚠️ REAL MONEY AT RISK")
+    else:
+        st.warning("🟠 **LIVE MODE** | Not Connected to Goodwill | Login Required")
+else:
+    if bot.data_feed.is_connected:
+        st.warning("🟠 **PAPER TRADING MODE** | Using Goodwill Live Data | Simulated Orders Only")
+    else:
+        st.info("🔵 **PAPER TRADING MODE** | Not Connected | Login Required for Broker Data")
 
 # ==================== PERFORMANCE METRICS ====================
 
@@ -868,11 +908,12 @@ with col_s3:
     st.metric("Max Loss", f"₹{perf['max_loss']:.0f}")
 
 with col_s4:
-    connection_time = ""
-    if bot.data_feed.last_login_time:
-        elapsed = datetime.now() - bot.data_feed.last_login_time
-        connection_time = f"{int(elapsed.total_seconds() / 60)}m"
-    st.metric("Connected", connection_time)
+    mode_display = f"{bot.mode}"
+    if bot.data_feed.is_connected:
+        mode_display += " (Goodwill Data)"
+    else:
+        mode_display += " (No Connection)"
+    st.metric("Trading Mode", mode_display)
 
 # ==================== ACTIVE POSITIONS ====================
 
@@ -881,9 +922,18 @@ st.subheader("📍 Active Positions")
 if bot.positions:
     positions_data = []
     for pos_id, pos in bot.positions.items():
-        # Get current price
-        live_data = bot.data_feed.get_live_data(pos['symbol'])
-        current_price = live_data['price'] if live_data else pos['entry_price']
+        # Get current price - always use broker data if connected
+        if bot.data_feed.is_connected:
+            live_data = bot.data_feed.get_live_data(pos['symbol'])
+            current_price = live_data['price'] if live_data else pos['entry_price']
+        else:
+            # Fallback to yfinance only if broker not connected
+            try:
+                ticker = yf.Ticker(f"{pos['symbol']}.NS")
+                hist = ticker.history(period="1d", interval="1m")
+                current_price = float(hist.iloc[-1]['Close']) if len(hist) > 0 else pos['entry_price']
+            except:
+                current_price = pos['entry_price']
         
         # Calculate current P&L
         if pos['action'] == 'BUY':
@@ -992,7 +1042,7 @@ if bot.trades:
 else:
     st.info("No trades executed yet")
 
-# ==================== LIVE CHARTS ====================
+# ==================== LIVE PERFORMANCE CHART ====================
 
 st.subheader("📊 Live Performance Chart")
 
@@ -1039,7 +1089,7 @@ status_col1, status_col2, status_col3 = st.columns(3)
 
 with status_col1:
     st.info(f"**Bot Status:** {'🟢 Running' if bot.is_running else '⚪ Stopped'}")
-    st.info(f"**Connection:** {'✅ Connected' if bot.data_feed.is_connected else '❌ Disconnected'}")
+    st.info(f"**Trading Mode:** {bot.mode}")
 
 with status_col2:
     st.info(f"**Max Positions:** {bot.max_positions}")
@@ -1048,6 +1098,25 @@ with status_col2:
 with status_col3:
     st.info(f"**Hold Time:** {bot.max_hold_time//60}m")
     st.info(f"**Risk:Reward:** 1:{bot.risk_reward_ratio}")
+
+# Connection status details
+connection_col1, connection_col2 = st.columns(2)
+with connection_col1:
+    if bot.data_feed.is_connected:
+        st.success("🟢 **Connected to Goodwill**")
+        if bot.data_feed.last_login_time:
+            login_time = bot.data_feed.last_login_time.strftime("%H:%M:%S")
+            st.caption(f"Logged in at: {login_time}")
+    else:
+        st.error("🔴 **Not Connected to Goodwill**")
+        st.caption("Login required for broker data")
+
+with connection_col2:
+    if st.session_state.gw_logged_in:
+        user_id = st.session_state.get("gw_user_id", "Unknown")
+        st.info(f"**User:** {user_id}")
+    else:
+        st.warning("**Status:** Not logged in")
 
 # ==================== AUTO-REFRESH AND TRADING CYCLE ====================
 
@@ -1063,6 +1132,84 @@ if bot.is_running:
     time.sleep(10)
     st.rerun()
 
+# ==================== EMERGENCY CONTROLS ====================
+
+with st.sidebar.expander("🚨 Emergency Controls", expanded=False):
+    st.warning("⚠️ Use these controls carefully")
+    
+    if st.button("🛑 Close All Positions", use_container_width=True):
+        if bot.positions:
+            positions_to_close = list(bot.positions.keys())
+            for pos_id in positions_to_close:
+                pos = bot.positions[pos_id]
+                
+                # Get current price for exit - always use broker data if connected
+                if bot.data_feed.is_connected:
+                    live_data = bot.data_feed.get_live_data(pos['symbol'])
+                    current_price = live_data['price'] if live_data else pos['entry_price']
+                else:
+                    try:
+                        ticker = yf.Ticker(f"{pos['symbol']}.NS")
+                        hist = ticker.history(period="1d", interval="1m")
+                        current_price = float(hist.iloc[-1]['Close']) if len(hist) > 0 else pos['entry_price']
+                    except:
+                        current_price = pos['entry_price']
+                
+                bot.close_position(pos_id, current_price, "EMERGENCY_CLOSE")
+            
+            st.success(f"Closed {len(positions_to_close)} positions")
+            st.rerun()
+        else:
+            st.info("No positions to close")
+    
+    if st.button("🔄 Reset Bot", use_container_width=True):
+        bot.positions = {}
+        bot.trades = []
+        bot.signals = []
+        bot.pnl = 0
+        bot.is_running = False
+        st.success("Bot reset successfully")
+        st.rerun()
+    
+    if st.button("💾 Export Trades", use_container_width=True):
+        if bot.trades:
+            df_export = pd.DataFrame(bot.trades)
+            csv = df_export.to_csv(index=False)
+            st.download_button(
+                label="📥 Download CSV",
+                data=csv,
+                file_name=f"scalping_trades_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+        else:
+            st.info("No trades to export")
+
+# ==================== DEBUG INFO ====================
+
+if st.sidebar.checkbox("🔍 Debug Info"):
+    st.sidebar.subheader("Debug Information")
+    debug_info = {
+        "Bot Running": bot.is_running,
+        "Trading Mode": bot.mode,
+        "GW Logged In": st.session_state.gw_logged_in,
+        "GW Connected": bot.data_feed.is_connected,
+        "Active Positions": len(bot.positions),
+        "Total Trades": len(bot.trades),
+        "Capital": bot.capital,
+        "P&L": bot.pnl,
+        "Cache Sizes": {
+            "Volatility": len(bot.volatility_cache),
+            "Momentum": len(bot.momentum_cache)
+        },
+        "Data Feed Status": {
+            "Has Session": bot.data_feed.session is not None,
+            "Has Token": bot.data_feed.access_token is not None,
+            "Token Length": len(bot.data_feed.access_token) if bot.data_feed.access_token else 0
+        }
+    }
+    st.sidebar.json(debug_info)
+
 # ==================== FOOTER ====================
 
 st.markdown("---")
@@ -1073,65 +1220,23 @@ with col_footer1:
 
 with col_footer2:
     if bot.data_feed.is_connected:
-        st.caption("🟢 Connected to Goodwill")
+        if bot.mode == "LIVE":
+            st.caption("🔴 Live Trading - Connected")
+        else:
+            st.caption("🟠 Paper Trading - Broker Data")
     else:
-        st.caption("🔴 Not Connected")
+        st.caption("🔵 Not Connected to Broker")
 
 with col_footer3:
-    st.caption(f"Version 1.0 | Adaptive Algorithm")
+    st.caption(f"Version 2.0 | Adaptive Scalping Algorithm")
 
-# ==================== EMERGENCY CONTROLS ====================
-
-with st.sidebar.expander("🚨 Emergency Controls", expanded=False):
-    st.warning("⚠️ Use these controls carefully")
-    
-    if st.button("🛑 Close All Positions"):
-        if bot.positions:
-            positions_to_close = list(bot.positions.keys())
-            for pos_id in positions_to_close:
-                pos = bot.positions[pos_id]
-                live_data = bot.data_feed.get_live_data(pos['symbol'])
-                if live_data:
-                    bot.close_position(pos_id, live_data['price'], "EMERGENCY_CLOSE")
-            st.success(f"Closed {len(positions_to_close)} positions")
-            st.rerun()
-        else:
-            st.info("No positions to close")
-    
-    if st.button("🔄 Reset Bot"):
-        bot.positions = {}
-        bot.trades = []
-        bot.signals = []
-        bot.pnl = 0
-        bot.is_running = False
-        st.success("Bot reset successfully")
-        st.rerun()
-    
-    if st.button("💾 Export Trades"):
-        if bot.trades:
-            df_export = pd.DataFrame(bot.trades)
-            csv = df_export.to_csv(index=False)
-            st.download_button(
-                label="📥 Download CSV",
-                data=csv,
-                file_name=f"scalping_trades_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                mime="text/csv"
-            )
-        else:
-            st.info("No trades to export")
-
-# ==================== DEBUG INFO ====================
-
-if st.sidebar.checkbox("🔍 Debug Info"):
-    st.sidebar.subheader("Debug Information")
-    st.sidebar.json({
-        "Active Positions": len(bot.positions),
-        "Total Trades": len(bot.trades),
-        "Cache Size": len(bot.volatility_cache),
-        "Running": bot.is_running,
-        "Connected": bot.data_feed.is_connected,
-        "Capital": bot.capital,
-        "P&L": bot.pnl
-    })
+# Info message when bot is stopped
+if not bot.is_running:
+    if not st.session_state.gw_logged_in:
+        st.info("💡 **Please login to Goodwill first, then configure settings and click 'Start Bot' to begin trading.**")
+    elif not bot.data_feed.is_connected:
+        st.warning("⚠️ **Connection to Goodwill failed. Please check credentials and try logging in again.**")
+    else:
+        st.info("💡 **Bot is ready! Click 'Start Bot' to begin trading with Goodwill live data.**")
 
 # ==================== END OF UI ====================
