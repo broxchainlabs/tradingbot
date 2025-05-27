@@ -61,10 +61,10 @@ class GoodwillOAuthHandler:
         # Multiple possible OAuth endpoints to try
         self.oauth_endpoints = [
             "https://api.gwcindia.in/oauth/login",
-            "https://web.gwcindia.in/oauth/login", 
+            "https://api.gwcindia.in/v1/{{api_name}}", 
             "https://developer.gwcindia.in/oauth/login",
             "https://api.gwcindia.in/v1/login",
-            "https://oauth.gwcindia.in/login"
+            "https://api.gwcindia.in/v1/"
         ]
         
     def generate_signature(self, api_key, request_token, api_secret):
