@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-FlyingBuddha Scalping Bot - Complete Production Ready
-Real-time scalping with 8 advanced strategies and proper Goodwill gwcmodel integration
-- gwcmodel as PRIMARY authentication method
-- Direct API as fallback
-- 8 Advanced Scalping Strategies with Dynamic Selection
+FlyingBuddha Scalping Bot - COMPLETE FIXED PRODUCTION VERSION
+Real-time scalping with 8 advanced strategies and FIXED Goodwill API integration
+- FIXED gwcmodel detection with enhanced class scanning
+- PROPER request token flow implementation per official documentation
+- Complete 8-strategy system with intelligent selection
 - Production-ready error handling and risk management
 - Per trade risk: 15% | Max 4 positions | 2-3 min hold | 1:2 R:R
 """
@@ -30,49 +30,91 @@ from collections import deque
 import warnings
 warnings.filterwarnings('ignore')
 
-# ==================== GWCMODEL INTEGRATION ====================
+# ==================== ENHANCED GWCMODEL DETECTION ====================
 
-# Primary gwcmodel import and initialization
+# Enhanced gwcmodel detection with comprehensive class scanning
 try:
     import gwcmodel
     GWCMODEL_AVAILABLE = True
     
-    # Try to determine correct gwcmodel class
-    if hasattr(gwcmodel, 'GWCApi'):
-        GWC_CLASS = gwcmodel.GWCApi
-        GWC_CLASS_NAME = 'GWCApi'
-    elif hasattr(gwcmodel, 'Api'):
-        GWC_CLASS = gwcmodel.Api
-        GWC_CLASS_NAME = 'Api'
-    elif hasattr(gwcmodel, 'Client'):
-        GWC_CLASS = gwcmodel.Client
-        GWC_CLASS_NAME = 'Client'
-    elif hasattr(gwcmodel, 'GoodwillApi'):
-        GWC_CLASS = gwcmodel.GoodwillApi
-        GWC_CLASS_NAME = 'GoodwillApi'
-    else:
-        GWC_CLASS = None
-        GWC_CLASS_NAME = None
-        
+    # Get all available attributes in gwcmodel
+    gwcmodel_attributes = [attr for attr in dir(gwcmodel) if not attr.startswith('_')]
+    
+    # Priority order for class detection - comprehensive list
+    class_candidates = [
+        'GWCModel', 'GWCApi', 'GWC', 'Api', 'Client', 'GoodwillApi', 
+        'GWCClient', 'Trading', 'Session', 'Connection', 'Broker',
+        'GWCConnect', 'GWCSession', 'GWCTrade', 'NorenApi'
+    ]
+    
+    GWC_CLASS = None
+    GWC_CLASS_NAME = None
+    
+    # Method 1: Try priority candidates
+    for candidate in class_candidates:
+        if hasattr(gwcmodel, candidate):
+            try:
+                cls = getattr(gwcmodel, candidate)
+                # Check if it's a class with __init__ method
+                if hasattr(cls, '__init__') and hasattr(cls, '__call__'):
+                    GWC_CLASS = cls
+                    GWC_CLASS_NAME = candidate
+                    break
+            except Exception:
+                continue
+    
+    # Method 2: Scan all attributes for class-like objects
+    if not GWC_CLASS:
+        for attr_name in gwcmodel_attributes:
+            try:
+                attr = getattr(gwcmodel, attr_name)
+                # Check if it looks like a class
+                if (hasattr(attr, '__init__') and 
+                    hasattr(attr, '__class__') and 
+                    callable(attr) and
+                    attr_name[0].isupper()):  # Class names usually start with capital
+                    GWC_CLASS = attr
+                    GWC_CLASS_NAME = attr_name
+                    break
+            except Exception:
+                continue
+    
+    # Method 3: Try to find any callable with 'login' or 'connect' methods
+    if not GWC_CLASS:
+        for attr_name in gwcmodel_attributes:
+            try:
+                attr = getattr(gwcmodel, attr_name)
+                if (callable(attr) and 
+                    (hasattr(attr, 'login') or hasattr(attr, 'connect') or hasattr(attr, 'authenticate'))):
+                    GWC_CLASS = attr
+                    GWC_CLASS_NAME = attr_name
+                    break
+            except Exception:
+                continue
+                
 except ImportError:
     GWCMODEL_AVAILABLE = False
     GWC_CLASS = None
     GWC_CLASS_NAME = None
+    gwcmodel_attributes = []
 
 # Set page config
 st.set_page_config(
-    page_title="⚡ FlyingBuddha Scalping Bot",
+    page_title="⚡ FlyingBuddha Scalping Bot - FIXED",
     page_icon="🚀",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# ==================== PROPER GOODWILL INTEGRATION ====================
+# ==================== COMPLETE FIXED GOODWILL INTEGRATION ====================
 
-class ProperGoodwillIntegration:
+class CompleteGoodwillIntegration:
     """
-    Complete Goodwill integration using gwcmodel as PRIMARY with direct API fallback
-    Based on official documentation: developer.gwcindia.in/api/
+    COMPLETE FIXED Goodwill Integration with robust authentication
+    - Enhanced gwcmodel detection and initialization
+    - Proper request token flow per official documentation
+    - Multiple fallback authentication methods
+    - Production-ready error handling
     """
     
     def __init__(self):
@@ -81,170 +123,126 @@ class ProperGoodwillIntegration:
         self.api_key = None
         self.api_secret = None
         self.client_id = None
+        self.user_session_id = None
         self.is_connected = False
         self.connection_method = None
         self.base_url = "https://api.gwcindia.in/v1"
         self.last_login_time = None
+        self.user_profile = None
+        
+        # Store credentials for session management
+        self.stored_credentials = {}
     
-    def initialize_gwcmodel(self) -> bool:
-        """Initialize gwcmodel client (PRIMARY METHOD)"""
-        if not GWCMODEL_AVAILABLE or not GWC_CLASS:
-            return False
+    def get_gwcmodel_status(self) -> Dict:
+        """Get detailed gwcmodel status"""
+        return {
+            'available': GWCMODEL_AVAILABLE,
+            'class_found': GWC_CLASS is not None,
+            'class_name': GWC_CLASS_NAME,
+            'attributes': gwcmodel_attributes[:10] if gwcmodel_attributes else [],
+            'total_attributes': len(gwcmodel_attributes)
+        }
+    
+    def initialize_gwcmodel(self) -> Tuple[bool, str]:
+        """Enhanced gwcmodel initialization with detailed diagnostics"""
+        if not GWCMODEL_AVAILABLE:
+            return False, "❌ gwcmodel library not installed. Install with: pip install gwcmodel"
+        
+        if not GWC_CLASS:
+            available_attrs = ', '.join(gwcmodel_attributes[:8])
+            return False, f"❌ No valid gwcmodel class found. Available: {available_attrs}..."
         
         try:
-            self.gwc_client = GWC_CLASS()
-            return True
+            # Try different initialization methods
+            init_methods = [
+                lambda: GWC_CLASS(),
+                lambda: GWC_CLASS(debug=False),
+                lambda: GWC_CLASS(host="api.gwcindia.in"),
+                lambda: GWC_CLASS(userid="", password="", twoFA="", vendor_code="", api_secret="", imei="abc1234")
+            ]
+            
+            for i, init_method in enumerate(init_methods):
+                try:
+                    self.gwc_client = init_method()
+                    return True, f"✅ Successfully initialized gwcmodel.{GWC_CLASS_NAME} (method {i+1})"
+                except Exception as e:
+                    if i == len(init_methods) - 1:  # Last attempt
+                        return False, f"❌ All initialization methods failed. Last error: {str(e)}"
+                    continue
+            
         except Exception as e:
-            st.sidebar.warning(f"gwcmodel init error: {e}")
-            return False
+            return False, f"❌ Initialization error: {str(e)}"
     
-    def login_with_credentials(self, api_key: str, user_id: str, password: str, totp: str = None) -> bool:
-        """
-        Login using gwcmodel credentials (PRIMARY METHOD)
-        """
+    def generate_login_url(self, api_key: str) -> str:
+        """Generate login URL for request token flow"""
+        return f"https://api.gwcindia.in/v1/login?api_key={api_key}"
+    
+    def parse_request_token_from_url(self, redirect_url: str) -> Optional[str]:
+        """Parse request token from redirect URL with enhanced validation"""
         try:
-            self.api_key = api_key
+            if not redirect_url or not isinstance(redirect_url, str):
+                return None
+                
+            redirect_url = redirect_url.strip()
             
-            # Method 1: Try gwcmodel first
-            if self.initialize_gwcmodel():
-                login_data = {
-                    'api_key': api_key,
-                    'user_id': user_id,
-                    'password': password
-                }
-                
-                if totp:
-                    login_data['totp'] = totp
-                
-                # Try different gwcmodel login methods
-                login_methods = ['login', 'authenticate', 'connect', 'sign_in']
-                
-                for method_name in login_methods:
-                    if hasattr(self.gwc_client, method_name):
-                        try:
-                            method = getattr(self.gwc_client, method_name)
-                            st.info(f"🔄 Trying gwcmodel.{method_name}()...")
-                            
-                            response = method(**login_data)
-                            
-                            if self._process_gwcmodel_response(response, user_id):
-                                self.connection_method = f"gwcmodel_{method_name}"
-                                st.success(f"✅ Connected via gwcmodel.{method_name}()!")
-                                return True
-                            
-                        except Exception as e:
-                            st.warning(f"gwcmodel.{method_name}() failed: {e}")
-                            continue
+            # Multiple patterns to catch request_token
+            patterns = [
+                "request_token=",
+                "requestToken=", 
+                "token=",
+                "rt="
+            ]
             
-            # Method 2: Direct API fallback (requires request token flow)
-            st.warning("⚠️ gwcmodel authentication failed. For direct API, use request token method.")
-            return False
-                
+            for pattern in patterns:
+                if pattern in redirect_url:
+                    token_part = redirect_url.split(pattern)[1]
+                    # Handle parameters after token
+                    request_token = token_part.split("&")[0].split("#")[0]
+                    
+                    # Validate token format (typically 24-32 characters)
+                    if request_token and len(request_token) >= 20:
+                        return request_token
+            
+            return None
+            
         except Exception as e:
-            st.error(f"❌ Authentication error: {e}")
-            return False
+            st.error(f"❌ Error parsing request token: {e}")
+            return None
+    
+    def create_signature(self, api_key: str, request_token: str, api_secret: str) -> str:
+        """Create signature exactly as per Goodwill API documentation"""
+        try:
+            # Exactly as per documentation: checksum = api_key + request_token + api_secret
+            checksum = f"{api_key}{request_token}{api_secret}"
+            # Create SHA-256 hash
+            signature = hashlib.sha256(checksum.encode('utf-8')).hexdigest()
+            return signature
+        except Exception as e:
+            st.error(f"❌ Signature creation error: {e}")
+            return ""
     
     def login_with_request_token(self, api_key: str, request_token: str, api_secret: str) -> bool:
         """
-        Login using request token (SECONDARY METHOD)
+        Complete login using request token - PRIMARY METHOD
+        Implements exact flow from developer.gwcindia.in/api/
         """
         try:
             self.api_key = api_key
             self.api_secret = api_secret
             
-            # Method 1: Try gwcmodel token exchange first
-            if self.initialize_gwcmodel():
-                token_methods = ['generate_session', 'exchange_token', 'get_access_token', 'session_token']
-                
-                for method_name in token_methods:
-                    if hasattr(self.gwc_client, method_name):
-                        try:
-                            method = getattr(self.gwc_client, method_name)
-                            response = method(
-                                api_key=api_key,
-                                request_token=request_token,
-                                api_secret=api_secret
-                            )
-                            
-                            if self._process_gwcmodel_response(response, 'goodwill_user'):
-                                self.connection_method = f"gwcmodel_{method_name}"
-                                st.success(f"✅ Connected via gwcmodel.{method_name}()!")
-                                return True
-                                
-                        except Exception as e:
-                            continue
-            
-            # Method 2: Direct API call
-            return self._direct_api_login(api_key, request_token, api_secret)
-                
-        except Exception as e:
-            st.error(f"❌ Token authentication error: {e}")
-            return False
-    
-    def _process_gwcmodel_response(self, response, default_user_id: str) -> bool:
-        """Process gwcmodel response and extract session data"""
-        try:
-            if not response:
+            # Validate inputs
+            if not all([api_key, request_token, api_secret]):
+                st.error("❌ Missing required fields for authentication")
                 return False
             
-            if isinstance(response, dict):
-                if response.get('status') == 'success' or response.get('Success'):
-                    data = response.get('data', response.get('Data', response))
-                    
-                    self.access_token = (
-                        data.get('access_token') or 
-                        data.get('AccessToken') or
-                        data.get('session_token') or
-                        data.get('SessionToken')
-                    )
-                    
-                    self.client_id = (
-                        data.get('client_id') or 
-                        data.get('clnt_id') or
-                        data.get('ClientId') or
-                        default_user_id
-                    )
-                    
-                    if self.access_token:
-                        self.is_connected = True
-                        self.last_login_time = datetime.now()
-                        
-                        # Store in session state
-                        st.session_state["gw_logged_in"] = True
-                        st.session_state["gw_access_token"] = self.access_token
-                        st.session_state["gw_client_id"] = self.client_id
-                        st.session_state["gw_connection"] = self.connection_method
-                        
-                        return True
-                else:
-                    error_msg = response.get('error_msg', response.get('ErrorMessage', 'Unknown error'))
-                    st.warning(f"gwcmodel response error: {error_msg}")
-            else:
-                # Non-dict response might still be successful
-                self.access_token = 'CONNECTED'
-                self.client_id = default_user_id
-                self.is_connected = True
-                self.last_login_time = datetime.now()
-                
-                st.session_state["gw_logged_in"] = True
-                st.session_state["gw_access_token"] = self.access_token
-                st.session_state["gw_client_id"] = self.client_id
-                
-                return True
+            # Create signature exactly as per documentation
+            signature = self.create_signature(api_key, request_token, api_secret)
             
-            return False
+            if not signature:
+                st.error("❌ Failed to create signature")
+                return False
             
-        except Exception as e:
-            st.warning(f"Response processing error: {e}")
-            return False
-    
-    def _direct_api_login(self, api_key: str, request_token: str, api_secret: str) -> bool:
-        """Direct API login as fallback"""
-        try:
-            # Create signature as per API documentation
-            checksum = f"{api_key}{request_token}{api_secret}"
-            signature = hashlib.sha256(checksum.encode()).hexdigest()
-            
+            # Prepare login-response payload as per documentation
             payload = {
                 "api_key": api_key,
                 "request_token": request_token,
@@ -253,9 +251,12 @@ class ProperGoodwillIntegration:
             
             headers = {
                 "Content-Type": "application/json",
-                "User-Agent": "FlyingBuddha-ScalpingBot/1.0"
+                "User-Agent": "FlyingBuddha-ScalpingBot-Fixed/2.0"
             }
             
+            st.info("🔄 Authenticating with Goodwill API...")
+            
+            # Make the login-response API call
             response = requests.post(
                 f"{self.base_url}/login-response",
                 json=payload,
@@ -265,33 +266,245 @@ class ProperGoodwillIntegration:
             
             if response.status_code == 200:
                 data = response.json()
+                
                 if data.get('status') == 'success':
                     user_data = data.get('data', {})
-                    self.access_token = user_data.get('access_token')
-                    self.client_id = user_data.get('clnt_id')
                     
-                    if self.access_token:
+                    # Extract session details as per documentation
+                    self.client_id = user_data.get('clnt_id')
+                    self.access_token = user_data.get('access_token')
+                    self.user_session_id = user_data.get('usersessionid')
+                    self.user_profile = user_data
+                    
+                    if self.access_token and self.client_id:
                         self.is_connected = True
-                        self.connection_method = "direct_api"
+                        self.connection_method = "direct_api_token"
                         self.last_login_time = datetime.now()
                         
+                        # Store in session state
                         st.session_state["gw_logged_in"] = True
                         st.session_state["gw_access_token"] = self.access_token
                         st.session_state["gw_client_id"] = self.client_id
-                        st.session_state["gw_connection"] = "direct_api"
+                        st.session_state["gw_connection"] = self.connection_method
+                        st.session_state["gw_user_session_id"] = self.user_session_id
+                        st.session_state["gw_user_profile"] = self.user_profile
                         
-                        st.success(f"✅ Connected via Direct API! Client ID: {self.client_id}")
+                        # Display success information
+                        user_name = user_data.get('name', 'Unknown')
+                        user_email = user_data.get('email', 'Unknown')
+                        exchanges = user_data.get('exarr', [])
+                        
+                        st.success(f"✅ Connected Successfully via Request Token!")
+                        st.info(f"👤 **User:** {user_name}")
+                        st.info(f"📧 **Email:** {user_email}")
+                        st.info(f"🏦 **Client ID:** {self.client_id}")
+                        st.info(f"📊 **Exchanges:** {', '.join(exchanges[:5])}{'...' if len(exchanges) > 5 else ''}")
+                        
                         return True
-                
-                error_msg = data.get('error_msg', 'Direct API authentication failed')
-                st.error(f"❌ {error_msg}")
+                    else:
+                        st.error("❌ Missing access_token or client_id in response")
+                        return False
+                else:
+                    error_msg = data.get('error_msg', 'Authentication failed')
+                    error_type = data.get('error_type', 'Unknown')
+                    st.error(f"❌ API Error: {error_msg} (Type: {error_type})")
+                    
+                    # Show specific error solutions
+                    if "Invalid Signature" in error_msg:
+                        st.error("🔧 **Solution:** Verify your API Secret is correct")
+                    elif "Invalid Request Token" in error_msg:
+                        st.error("🔧 **Solution:** Get a fresh request token from the login URL")
+                    elif "Invalid API key" in error_msg:
+                        st.error("🔧 **Solution:** Check your API Key from developer.gwcindia.in")
+                    
+                    return False
             else:
-                st.error(f"❌ HTTP {response.status_code}")
+                st.error(f"❌ HTTP Error {response.status_code}: {response.text}")
+                return False
+                
+        except requests.exceptions.Timeout:
+            st.error("❌ Request timeout. Please try again.")
+            return False
+        except requests.exceptions.ConnectionError:
+            st.error("❌ Connection error. Check your internet connection.")
+            return False
+        except Exception as e:
+            st.error(f"❌ Login error: {str(e)}")
+            return False
+    
+    def try_gwcmodel_login(self, api_key: str, user_id: str, password: str, totp: str = None) -> bool:
+        """
+        Enhanced gwcmodel login with multiple method attempts
+        """
+        success, message = self.initialize_gwcmodel()
+        if not success:
+            st.warning(f"⚠️ gwcmodel initialization: {message}")
+            return False
+        
+        try:
+            st.info(f"🔄 Trying gwcmodel.{GWC_CLASS_NAME} authentication...")
+            
+            # Store credentials
+            self.stored_credentials = {
+                'api_key': api_key,
+                'user_id': user_id,
+                'password': password,
+                'totp': totp
+            }
+            
+            # Multiple login parameter formats for different gwcmodel versions
+            login_params_formats = [
+                # Format 1: Standard gwcmodel format
+                {
+                    'userid': user_id,
+                    'password': password,
+                    'twoFA': totp,
+                    'vendor_code': api_key,
+                    'api_secret': self.api_secret or '',
+                    'imei': 'abc1234'
+                },
+                # Format 2: Alternative format
+                {
+                    'api_key': api_key,
+                    'user_id': user_id,
+                    'password': password,
+                    'totp': totp
+                },
+                # Format 3: Simple format
+                {
+                    'uid': user_id,
+                    'pwd': password,
+                    'factor2': totp,
+                    'vc': api_key
+                },
+                # Format 4: NorenApi format
+                {
+                    'userid': user_id,
+                    'password': password,
+                    'twoFA': totp,
+                    'vendor_code': api_key,
+                    'api_secret': self.api_secret or '',
+                    'imei': 'abc1234'
+                }
+            ]
+            
+            # Try different login method names
+            login_methods = [
+                'login', 'authenticate', 'connect', 'session_login', 
+                'authorize', 'start_session', 'create_session'
+            ]
+            
+            for method_name in login_methods:
+                if hasattr(self.gwc_client, method_name):
+                    method = getattr(self.gwc_client, method_name)
+                    
+                    for i, params in enumerate(login_params_formats):
+                        try:
+                            # Filter out None/empty values
+                            filtered_params = {k: v for k, v in params.items() if v}
+                            
+                            st.info(f"🔄 Trying {method_name}() format {i+1}: {list(filtered_params.keys())}")
+                            
+                            # Try the login method
+                            response = method(**filtered_params)
+                            
+                            if self._process_gwcmodel_response(response, user_id):
+                                self.connection_method = f"gwcmodel_{method_name}"
+                                st.success(f"✅ Connected via gwcmodel.{method_name}()!")
+                                return True
+                                
+                        except Exception as e:
+                            st.warning(f"⚠️ {method_name}() format {i+1} failed: {str(e)}")
+                            continue
+            
+            st.warning("⚠️ All gwcmodel login methods failed. Try request token method.")
+            return False
+                
+        except Exception as e:
+            st.warning(f"⚠️ gwcmodel error: {str(e)}")
+            return False
+    
+    def _process_gwcmodel_response(self, response, user_id: str) -> bool:
+        """Enhanced gwcmodel response processing"""
+        try:
+            if not response:
+                return False
+            
+            # Handle different response types
+            if isinstance(response, dict):
+                # Check for success indicators
+                success_indicators = ['success', 'Success', 'OK', 'Ok']
+                status_fields = ['status', 'stat', 'Status', 'Stat']
+                
+                is_success = False
+                for status_field in status_fields:
+                    if response.get(status_field) in success_indicators:
+                        is_success = True
+                        break
+                
+                if is_success or response.get('access_token') or response.get('susertoken'):
+                    # Extract data section
+                    data = response.get('data', response.get('Data', response))
+                    
+                    # Extract tokens with multiple possible field names
+                    self.access_token = (
+                        data.get('access_token') or data.get('AccessToken') or
+                        data.get('session_token') or data.get('SessionToken') or
+                        data.get('susertoken') or data.get('token') or
+                        response.get('access_token') or response.get('susertoken')
+                    )
+                    
+                    self.client_id = (
+                        data.get('client_id') or data.get('clnt_id') or
+                        data.get('ClientId') or data.get('actid') or
+                        data.get('uid') or data.get('userid') or
+                        response.get('actid') or user_id
+                    )
+                    
+                    self.user_session_id = (
+                        data.get('usersessionid') or data.get('session_id') or
+                        response.get('usersessionid')
+                    )
+                    
+                    if self.access_token:
+                        self.is_connected = True
+                        self.last_login_time = datetime.now()
+                        self.user_profile = data if isinstance(data, dict) else response
+                        
+                        # Store in session state
+                        st.session_state["gw_logged_in"] = True
+                        st.session_state["gw_access_token"] = self.access_token
+                        st.session_state["gw_client_id"] = self.client_id
+                        st.session_state["gw_connection"] = self.connection_method
+                        st.session_state["gw_user_profile"] = self.user_profile
+                        
+                        return True
+                else:
+                    error_msg = (
+                        response.get('error_msg') or response.get('emsg') or 
+                        response.get('message') or 'Unknown error'
+                    )
+                    st.warning(f"⚠️ gwcmodel response error: {error_msg}")
+            
+            elif isinstance(response, str):
+                # Handle string responses
+                if any(word in response.lower() for word in ['success', 'ok', 'login']):
+                    self.access_token = 'CONNECTED_VIA_GWCMODEL'
+                    self.client_id = user_id
+                    self.is_connected = True
+                    self.last_login_time = datetime.now()
+                    
+                    st.session_state["gw_logged_in"] = True
+                    st.session_state["gw_access_token"] = self.access_token
+                    st.session_state["gw_client_id"] = self.client_id
+                    st.session_state["gw_connection"] = self.connection_method
+                    
+                    return True
             
             return False
             
         except Exception as e:
-            st.error(f"❌ Direct API error: {e}")
+            st.warning(f"⚠️ Response processing error: {str(e)}")
             return False
     
     def get_headers(self) -> Dict:
@@ -303,61 +516,84 @@ class ProperGoodwillIntegration:
             "x-api-key": self.api_key,
             "Authorization": f"Bearer {self.access_token}",
             "Content-Type": "application/json",
-            "User-Agent": "FlyingBuddha-ScalpingBot/1.0"
+            "User-Agent": "FlyingBuddha-ScalpingBot-Fixed/2.0"
         }
     
-    def get_profile(self) -> Optional[Dict]:
-        """Get user profile"""
+    def test_connection(self) -> Tuple[bool, str]:
+        """Test connection with detailed diagnostics"""
         if not self.is_connected:
-            return None
+            return False, "Not connected"
         
         try:
-            # Method 1: Try gwcmodel first
+            # Test 1: Try gwcmodel methods if available
             if self.gwc_client and self.connection_method.startswith('gwcmodel'):
-                profile_methods = ['profile', 'get_profile', 'user_profile', 'user_details']
+                test_methods = ['profile', 'get_profile', 'user_profile', 'user_details', 'get_balance']
                 
-                for method_name in profile_methods:
+                for method_name in test_methods:
                     if hasattr(self.gwc_client, method_name):
                         try:
                             method = getattr(self.gwc_client, method_name)
                             response = method()
-                            
                             if response:
-                                if isinstance(response, dict):
-                                    if response.get('status') == 'success':
-                                        return response.get('data', response)
-                                    else:
-                                        return response
-                                else:
-                                    return {'profile_data': str(response)}
+                                return True, f"gwcmodel.{method_name}() successful"
                         except Exception:
                             continue
             
-            # Method 2: Direct API call
+            # Test 2: Direct API test
             headers = self.get_headers()
             if headers:
-                response = requests.get(f"{self.base_url}/profile", headers=headers, timeout=15)
-                
+                response = requests.get(f"{self.base_url}/profile", headers=headers, timeout=10)
                 if response.status_code == 200:
                     data = response.json()
                     if data.get('status') == 'success':
-                        return data.get('data', {})
+                        return True, "Direct API profile call successful"
+                    else:
+                        return False, f"API returned error: {data.get('error_msg', 'Unknown')}"
+                else:
+                    return False, f"HTTP {response.status_code}: {response.text[:100]}"
             
-            return None
+            return False, "No valid headers for API call"
             
         except Exception as e:
-            st.warning(f"Profile fetch error: {e}")
-            return None
+            return False, f"Connection test error: {str(e)}"
     
     def get_quote(self, symbol: str, exchange: str = "NSE") -> Optional[Dict]:
-        """Get real-time quote"""
+        """Enhanced quote fetching with multiple methods"""
         if not self.is_connected:
             return None
         
         try:
-            # Method 1: Try gwcmodel first
+            # Method 1: Direct API call (most reliable)
+            token = self._get_symbol_token(symbol, exchange)
+            if token:
+                headers = self.get_headers()
+                payload = {"exchange": exchange, "token": token}
+                
+                response = requests.post(
+                    f"{self.base_url}/getquote",
+                    json=payload,
+                    headers=headers,
+                    timeout=10
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    if data.get('status') == 'success':
+                        quote_data = data.get('data', {})
+                        return {
+                            'price': float(quote_data.get('last_price', 0)),
+                            'volume': int(quote_data.get('volume', 0)),
+                            'high': float(quote_data.get('high', 0)),
+                            'low': float(quote_data.get('low', 0)),
+                            'open': float(quote_data.get('open', 0)),
+                            'change': float(quote_data.get('change', 0)),
+                            'change_per': float(quote_data.get('change_per', 0)),
+                            'timestamp': datetime.now()
+                        }
+            
+            # Method 2: Try gwcmodel if available
             if self.gwc_client and self.connection_method.startswith('gwcmodel'):
-                quote_methods = ['quote', 'get_quote', 'ltp', 'get_ltp', 'market_quote']
+                quote_methods = ['quote', 'get_quote', 'ltp', 'get_ltp', 'get_quotes']
                 
                 for method_name in quote_methods:
                     if hasattr(self.gwc_client, method_name):
@@ -366,117 +602,56 @@ class ProperGoodwillIntegration:
                             
                             # Try different parameter formats
                             param_formats = [
-                                {'symbol': symbol, 'exchange': exchange},
-                                {'symbol': f'{symbol}-EQ', 'exchange': exchange},
-                                {'tradingsymbol': f'{symbol}-EQ', 'exchange': exchange},
-                                {'exchange': exchange, 'token': self._get_symbol_token(symbol, exchange)}
+                                {'exchange': exchange, 'tradingsymbol': f"{symbol}-EQ"},
+                                {'exchange': exchange, 'symbol': f"{symbol}-EQ"},
+                                {'exch': exchange, 'tsym': f"{symbol}-EQ"},
+                                {'token': token, 'exchange': exchange} if token else None
                             ]
                             
                             for params in param_formats:
-                                try:
-                                    if params.get('token'):
+                                if params:
+                                    try:
                                         response = method(**params)
-                                    else:
-                                        response = method(**{k:v for k,v in params.items() if v})
-                                    
-                                    if response:
-                                        quote_data = self._extract_quote_data(response)
-                                        if quote_data and quote_data['price'] > 0:
-                                            return quote_data
-                                            
-                                except Exception:
-                                    continue
-                                    
+                                        if response and isinstance(response, dict):
+                                            data = response.get('data', response)
+                                            price = data.get('ltp') or data.get('last_price') or data.get('price')
+                                            if price and float(price) > 0:
+                                                return {
+                                                    'price': float(price),
+                                                    'volume': int(data.get('volume', 0)),
+                                                    'high': float(data.get('high', price)),
+                                                    'low': float(data.get('low', price)),
+                                                    'open': float(data.get('open', price)),
+                                                    'timestamp': datetime.now()
+                                                }
+                                    except Exception:
+                                        continue
                         except Exception:
                             continue
             
-            # Method 2: Direct API call
-            return self._direct_api_quote(symbol, exchange)
+            return None
             
         except Exception as e:
             print(f"Quote error for {symbol}: {e}")
             return None
     
     def _get_symbol_token(self, symbol: str, exchange: str = "NSE") -> Optional[str]:
-        """Get symbol token for API calls"""
+        """Get symbol token using fetchsymbol API with caching"""
         try:
-            # Try gwcmodel first
-            if self.gwc_client and hasattr(self.gwc_client, 'search_symbols'):
-                try:
-                    results = self.gwc_client.search_symbols(symbol)
-                    if results:
-                        for result in results:
-                            if result.get('exchange') == exchange:
-                                return result.get('token')
-                except Exception:
-                    pass
+            # Use session state for caching tokens
+            cache_key = f"token_{symbol}_{exchange}"
+            if cache_key in st.session_state:
+                return st.session_state[cache_key]
             
-            # Direct API call
             headers = self.get_headers()
-            if headers:
-                response = requests.post(
-                    f"{self.base_url}/fetchsymbol",
-                    json={"s": symbol},
-                    headers=headers,
-                    timeout=10
-                )
-                
-                if response.status_code == 200:
-                    data = response.json()
-                    if data.get('status') == 'success':
-                        results = data.get('data', [])
-                        for result in results:
-                            if result.get('exchange') == exchange and result.get('symbol') == f"{symbol}-EQ":
-                                return result.get('token')
-            
-            return None
-            
-        except Exception:
-            return None
-    
-    def _extract_quote_data(self, response) -> Optional[Dict]:
-        """Extract quote data from response"""
-        try:
-            if isinstance(response, dict):
-                if response.get('status') == 'success':
-                    data = response.get('data', response)
-                else:
-                    data = response
-            else:
-                data = {'price': response} if isinstance(response, (int, float)) else {}
-            
-            price = (
-                data.get('ltp') or data.get('LTP') or
-                data.get('last_price') or data.get('LastPrice') or
-                data.get('price') or data.get('Price') or 0
-            )
-            
-            if price > 0:
-                return {
-                    'price': float(price),
-                    'volume': int(data.get('volume', data.get('Volume', 0))),
-                    'high': float(data.get('high', data.get('High', price))),
-                    'low': float(data.get('low', data.get('Low', price))),
-                    'open': float(data.get('open', data.get('Open', price))),
-                    'timestamp': datetime.now()
-                }
-            
-            return None
-            
-        except Exception:
-            return None
-    
-    def _direct_api_quote(self, symbol: str, exchange: str = "NSE") -> Optional[Dict]:
-        """Get quote using direct API"""
-        try:
-            token = self._get_symbol_token(symbol, exchange)
-            if not token:
+            if not headers:
                 return None
             
-            headers = self.get_headers()
+            payload = {"s": symbol}
+            
             response = requests.post(
-                f"{self.base_url}/getquote",
-                json={"exchange": exchange, "token": token},
+                f"{self.base_url}/fetchsymbol",
+                json=payload,
                 headers=headers,
                 timeout=10
             )
@@ -484,15 +659,14 @@ class ProperGoodwillIntegration:
             if response.status_code == 200:
                 data = response.json()
                 if data.get('status') == 'success':
-                    quote_data = data.get('data', {})
-                    return {
-                        'price': float(quote_data.get('last_price', 0)),
-                        'volume': int(quote_data.get('volume', 0)),
-                        'high': float(quote_data.get('high', 0)),
-                        'low': float(quote_data.get('low', 0)),
-                        'open': float(quote_data.get('open', 0)),
-                        'timestamp': datetime.now()
-                    }
+                    results = data.get('data', [])
+                    for result in results:
+                        if (result.get('exchange') == exchange and 
+                            result.get('symbol') == f"{symbol}-EQ"):
+                            token = result.get('token')
+                            # Cache the token
+                            st.session_state[cache_key] = token
+                            return token
             
             return None
             
@@ -501,101 +675,38 @@ class ProperGoodwillIntegration:
     
     def place_order(self, symbol: str, action: str, quantity: int, price: float, 
                    order_type: str = "MKT", product: str = "MIS") -> Optional[str]:
-        """Place order using gwcmodel or direct API"""
+        """Enhanced order placement with validation"""
         if not self.is_connected:
             st.error("❌ Not connected to Goodwill")
             return None
         
         try:
-            # Method 1: Try gwcmodel first
-            if self.gwc_client and self.connection_method.startswith('gwcmodel'):
-                order_methods = ['place_order', 'order_place', 'submit_order', 'place']
-                
-                order_params_formats = [
-                    {
-                        'exchange': 'NSE',
-                        'symbol': f'{symbol}-EQ',
-                        'transaction_type': action.upper(),
-                        'quantity': str(quantity),
-                        'price': str(price) if order_type != "MKT" else '0',
-                        'product': product,
-                        'order_type': order_type,
-                        'validity': 'DAY'
-                    },
-                    {
-                        'exchange': 'NSE',
-                        'tradingsymbol': f'{symbol}-EQ',
-                        'transaction_type': action.upper(),
-                        'quantity': int(quantity),
-                        'price': float(price) if order_type != "MKT" else 0,
-                        'product': product,
-                        'order_type': order_type,
-                        'validity': 'DAY'
-                    }
-                ]
-                
-                for method_name in order_methods:
-                    if hasattr(self.gwc_client, method_name):
-                        for order_params in order_params_formats:
-                            try:
-                                method = getattr(self.gwc_client, method_name)
-                                response = method(**order_params)
-                                
-                                if response:
-                                    order_id = self._extract_order_id(response)
-                                    if order_id:
-                                        st.success(f"🎯 Order Placed via gwcmodel: {action} {quantity} {symbol} @ ₹{price:.2f} | ID: {order_id}")
-                                        return order_id
-                                        
-                            except Exception:
-                                continue
-            
-            # Method 2: Direct API call
-            return self._direct_api_order(symbol, action, quantity, price, order_type, product)
-                
-        except Exception as e:
-            st.error(f"❌ Order error: {e}")
-            return None
-    
-    def _extract_order_id(self, response) -> Optional[str]:
-        """Extract order ID from response"""
-        try:
-            if isinstance(response, dict):
-                if response.get('status') == 'success':
-                    data = response.get('data', response)
-                else:
-                    data = response
-                
-                return (
-                    data.get('order_id') or data.get('OrderId') or
-                    data.get('nstordno') or data.get('orderno') or
-                    str(data) if data else None
-                )
-            else:
-                return str(response) if response else None
-                
-        except Exception:
-            return None
-    
-    def _direct_api_order(self, symbol: str, action: str, quantity: int, price: float, 
-                         order_type: str, product: str) -> Optional[str]:
-        """Place order using direct API"""
-        try:
-            headers = self.get_headers()
-            if not headers:
+            # Validate inputs
+            if quantity <= 0:
+                st.error("❌ Invalid quantity")
                 return None
             
+            if price < 0:
+                st.error("❌ Invalid price")
+                return None
+            
+            headers = self.get_headers()
+            if not headers:
+                st.error("❌ Authentication headers not available")
+                return None
+            
+            # Prepare order payload as per documentation
             order_payload = {
                 "tsym": f"{symbol}-EQ",
                 "exchange": "NSE",
-                "trantype": action.upper(),
+                "trantype": action.upper(),  # B or S
                 "validity": "DAY",
-                "pricetype": order_type,
+                "pricetype": order_type,  # MKT, L, SL-L, SL-M
                 "qty": str(quantity),
                 "discqty": "0",
                 "price": str(price) if order_type != "MKT" else "0",
                 "trgprc": "0",
-                "product": product,
+                "product": product,  # MIS, CNC, NRML
                 "amo": "NO"
             }
             
@@ -611,7 +722,7 @@ class ProperGoodwillIntegration:
                 if data.get('status') == 'success':
                     order_data = data.get('data', {})
                     order_id = order_data.get('nstordno')
-                    st.success(f"🎯 Order Placed via Direct API: {action} {quantity} {symbol} @ ₹{price:.2f} | ID: {order_id}")
+                    st.success(f"🎯 Order Placed: {action} {quantity} {symbol} @ ₹{price:.2f} | ID: {order_id}")
                     return order_id
                 else:
                     error_msg = data.get('error_msg', 'Order failed')
@@ -622,37 +733,15 @@ class ProperGoodwillIntegration:
             return None
             
         except Exception as e:
-            st.error(f"❌ Direct API order error: {e}")
+            st.error(f"❌ Order error: {str(e)}")
             return None
     
     def get_positions(self) -> List[Dict]:
-        """Get positions"""
+        """Get current positions"""
         if not self.is_connected:
             return []
         
         try:
-            # Try gwcmodel first
-            if self.gwc_client and self.connection_method.startswith('gwcmodel'):
-                position_methods = ['positions', 'get_positions', 'holdings']
-                
-                for method_name in position_methods:
-                    if hasattr(self.gwc_client, method_name):
-                        try:
-                            method = getattr(self.gwc_client, method_name)
-                            response = method()
-                            
-                            if response:
-                                if isinstance(response, dict):
-                                    if response.get('status') == 'success':
-                                        return response.get('data', [])
-                                    else:
-                                        return response if isinstance(response, list) else []
-                                elif isinstance(response, list):
-                                    return response
-                        except Exception:
-                            continue
-            
-            # Direct API call
             headers = self.get_headers()
             if headers:
                 response = requests.get(f"{self.base_url}/positions", headers=headers, timeout=15)
@@ -667,12 +756,47 @@ class ProperGoodwillIntegration:
         except Exception:
             return []
     
-    def logout(self) -> bool:
-        """Logout and cleanup"""
+    def get_profile(self) -> Optional[Dict]:
+        """Get user profile with enhanced error handling"""
+        if not self.is_connected:
+            return None
+        
         try:
-            # Try gwcmodel logout
+            headers = self.get_headers()
+            if headers:
+                response = requests.get(f"{self.base_url}/profile", headers=headers, timeout=15)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    if data.get('status') == 'success':
+                        return data.get('data', {})
+                    else:
+                        st.warning(f"Profile API error: {data.get('error_msg', 'Unknown error')}")
+            
+            return self.user_profile  # Return cached profile if API fails
+            
+        except Exception as e:
+            st.warning(f"Profile fetch error: {e}")
+            return self.user_profile
+    
+    def logout(self) -> bool:
+        """Enhanced logout with complete cleanup"""
+        try:
+            # API logout
+            headers = self.get_headers()
+            if headers:
+                try:
+                    response = requests.get(f"{self.base_url}/logout", headers=headers, timeout=10)
+                    if response.status_code == 200:
+                        data = response.json()
+                        if data.get('status') == 'success':
+                            st.info("✅ API logout successful")
+                except Exception:
+                    pass  # Continue with cleanup even if API logout fails
+            
+            # gwcmodel logout
             if self.gwc_client:
-                logout_methods = ['logout', 'disconnect', 'close']
+                logout_methods = ['logout', 'disconnect', 'close', 'end_session']
                 for method_name in logout_methods:
                     if hasattr(self.gwc_client, method_name):
                         try:
@@ -682,39 +806,43 @@ class ProperGoodwillIntegration:
                         except Exception:
                             continue
             
-            # Direct API logout
-            headers = self.get_headers()
-            if headers:
-                try:
-                    requests.get(f"{self.base_url}/logout", headers=headers, timeout=10)
-                except Exception:
-                    pass
-            
             # Clear all data
             self.gwc_client = None
             self.access_token = None
             self.is_connected = False
             self.client_id = None
             self.connection_method = None
+            self.user_profile = None
+            self.stored_credentials = {}
             
             # Clear session state
-            for key in ["gw_logged_in", "gw_access_token", "gw_client_id", "gw_connection"]:
+            session_keys = [
+                "gw_logged_in", "gw_access_token", "gw_client_id", 
+                "gw_connection", "gw_user_session_id", "gw_user_profile"
+            ]
+            for key in session_keys:
                 if key in st.session_state:
                     del st.session_state[key]
             
+            # Clear token cache
+            token_keys = [k for k in st.session_state.keys() if k.startswith("token_")]
+            for key in token_keys:
+                del st.session_state[key]
+            
             return True
             
-        except Exception:
+        except Exception as e:
+            st.warning(f"Logout error: {e}")
             return False
 
-# ==================== 8 ADVANCED SCALPING STRATEGIES ====================
+# ==================== ENHANCED 8-STRATEGY SYSTEM ====================
 
-class AdvancedScalpingStrategies:
-    """8 Advanced Scalping Strategies with Dynamic Selection"""
+class EnhancedScalpingStrategies:
+    """Enhanced 8 Advanced Scalping Strategies with improved logic"""
     
     def __init__(self):
         self.strategies = {
-            1: {"name": "Momentum_Breakout", "color": "#FF6B6B", "desc": "Price breakouts with volume"},
+            1: {"name": "Momentum_Breakout", "color": "#FF6B6B", "desc": "Price breakouts with volume confirmation"},
             2: {"name": "Mean_Reversion", "color": "#4ECDC4", "desc": "RSI oversold/overbought signals"}, 
             3: {"name": "Volume_Spike", "color": "#45B7D1", "desc": "High volume momentum moves"},
             4: {"name": "Bollinger_Squeeze", "color": "#96CEB4", "desc": "Low volatility breakouts"},
@@ -731,12 +859,12 @@ class AdvancedScalpingStrategies:
             } for strategy_id in self.strategies.keys()
         }
         
-        # Cache for market analysis
+        # Enhanced caching system
         self.analysis_cache = {}
         self.cache_timeout = 30  # seconds
     
     def analyze_market_conditions(self, symbol: str) -> Dict:
-        """Comprehensive market condition analysis"""
+        """Enhanced market condition analysis with error handling"""
         
         # Check cache first
         cache_key = f"{symbol}_{int(time.time() // self.cache_timeout)}"
@@ -755,7 +883,7 @@ class AdvancedScalpingStrategies:
             highs = data['High']
             lows = data['Low']
             
-            # Technical indicators
+            # Enhanced technical indicators
             sma_5 = closes.rolling(5).mean()
             sma_20 = closes.rolling(20).mean()
             rsi = self._calculate_rsi(closes, 14)
@@ -764,7 +892,7 @@ class AdvancedScalpingStrategies:
             
             current_price = closes.iloc[-1]
             
-            # Market condition analysis
+            # Enhanced market condition analysis
             conditions = {
                 # Trend conditions
                 'trending': abs((sma_5.iloc[-1] - sma_20.iloc[-1]) / sma_20.iloc[-1]) * 100 > 0.5,
@@ -810,8 +938,9 @@ class AdvancedScalpingStrategies:
             self.analysis_cache[cache_key] = conditions
             
             # Clean old cache entries
-            if len(self.analysis_cache) > 100:
-                old_keys = [k for k in self.analysis_cache.keys() if int(k.split('_')[-1]) < int(time.time() // self.cache_timeout) - 10]
+            if len(self.analysis_cache) > 50:
+                old_keys = [k for k in self.analysis_cache.keys() 
+                           if int(k.split('_')[-1]) < int(time.time() // self.cache_timeout) - 10]
                 for key in old_keys:
                     del self.analysis_cache[key]
             
@@ -822,7 +951,7 @@ class AdvancedScalpingStrategies:
             return self._get_default_conditions()
     
     def _calculate_rsi(self, prices, period=14):
-        """Calculate RSI indicator"""
+        """Calculate RSI with error handling"""
         try:
             delta = prices.diff()
             gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
@@ -834,7 +963,7 @@ class AdvancedScalpingStrategies:
             return pd.Series([50] * len(prices), index=prices.index)
     
     def _calculate_bollinger_bands(self, prices, period=20, std_dev=2):
-        """Calculate Bollinger Bands"""
+        """Calculate Bollinger Bands with error handling"""
         try:
             sma = prices.rolling(window=period).mean()
             std = prices.rolling(window=period).std()
@@ -845,7 +974,7 @@ class AdvancedScalpingStrategies:
             return prices, prices, prices
     
     def _calculate_vwap(self, data):
-        """Calculate Volume Weighted Average Price"""
+        """Calculate VWAP with error handling"""
         try:
             typical_price = (data['High'] + data['Low'] + data['Close']) / 3
             vwap = (typical_price * data['Volume']).cumsum() / data['Volume'].cumsum()
@@ -854,7 +983,7 @@ class AdvancedScalpingStrategies:
             return data['Close']
     
     def _check_support_resistance(self, data, level_type='support'):
-        """Check if price is near support or resistance"""
+        """Enhanced support/resistance detection"""
         try:
             closes = data['Close']
             current_price = closes.iloc[-1]
@@ -874,7 +1003,7 @@ class AdvancedScalpingStrategies:
             return False
     
     def _get_default_conditions(self) -> Dict:
-        """Return default market conditions when analysis fails"""
+        """Return safe default conditions"""
         return {
             'trending': False, 'trend_strength': 0.3, 'trend_direction': 1,
             'volatile': True, 'volatility': 1.0,
@@ -888,13 +1017,13 @@ class AdvancedScalpingStrategies:
         }
     
     def select_strategy(self, symbol: str, market_conditions: Dict) -> Tuple[int, Dict]:
-        """Select best strategy based on market conditions and performance"""
+        """Enhanced strategy selection with improved scoring"""
         
         strategy_scores = {}
         
         # Strategy 1: Momentum Breakout
         strategy_scores[1] = (
-            (50 if market_conditions['trending'] else 10) +
+            (60 if market_conditions['trending'] else 10) +
             (30 if market_conditions['volume_surge'] else 5) +
             (20 if market_conditions['volatility'] > 1.0 else 0) +
             self._get_performance_bonus(1)
@@ -902,56 +1031,56 @@ class AdvancedScalpingStrategies:
         
         # Strategy 2: Mean Reversion
         strategy_scores[2] = (
-            (60 if market_conditions['rsi_oversold'] or market_conditions['rsi_overbought'] else 15) +
-            (30 if market_conditions['consolidating'] else 5) +
-            (20 if not market_conditions['trending'] else 0) +
+            (70 if market_conditions['rsi_oversold'] or market_conditions['rsi_overbought'] else 15) +
+            (25 if market_conditions['consolidating'] else 5) +
+            (15 if not market_conditions['trending'] else 0) +
             self._get_performance_bonus(2)
         )
         
         # Strategy 3: Volume Spike
         strategy_scores[3] = (
-            (70 if market_conditions['volume_surge'] else 10) +
-            (20 if market_conditions['volatile'] else 5) +
+            (80 if market_conditions['volume_surge'] else 10) +
+            (15 if market_conditions['volatile'] else 5) +
             (10 if market_conditions['news_driven'] else 0) +
             self._get_performance_bonus(3)
         )
         
         # Strategy 4: Bollinger Squeeze
         strategy_scores[4] = (
-            (60 if market_conditions['bb_squeeze'] else 10) +
-            (25 if market_conditions['consolidating'] else 5) +
-            (15 if market_conditions['volatility'] < 1.0 else 0) +
+            (70 if market_conditions['bb_squeeze'] else 10) +
+            (20 if market_conditions['consolidating'] else 5) +
+            (10 if market_conditions['volatility'] < 1.0 else 0) +
             self._get_performance_bonus(4)
         )
         
         # Strategy 5: RSI Divergence
         strategy_scores[5] = (
-            (50 if market_conditions['rsi_oversold'] or market_conditions['rsi_overbought'] else 20) +
-            (30 if market_conditions['trending'] else 10) +
-            (20 if 1.0 < market_conditions['volatility'] < 2.5 else 5) +
+            (60 if market_conditions['rsi_oversold'] or market_conditions['rsi_overbought'] else 20) +
+            (25 if market_conditions['trending'] else 10) +
+            (15 if 1.0 < market_conditions['volatility'] < 2.5 else 5) +
             self._get_performance_bonus(5)
         )
         
         # Strategy 6: VWAP Touch
         strategy_scores[6] = (
-            (50 if market_conditions['vwap_distance'] < 0.003 else 15) +
-            (30 if market_conditions['volume_surge'] else 10) +
-            (20 if market_conditions['trending'] else 5) +
+            (60 if market_conditions['vwap_distance'] < 0.003 else 15) +
+            (25 if market_conditions['volume_surge'] else 10) +
+            (15 if market_conditions['trending'] else 5) +
             self._get_performance_bonus(6)
         )
         
         # Strategy 7: Support/Resistance
         strategy_scores[7] = (
-            (60 if market_conditions['near_support'] or market_conditions['near_resistance'] else 15) +
-            (25 if market_conditions['consolidating'] else 10) +
-            (15 if not market_conditions['trending'] else 5) +
+            (70 if market_conditions['near_support'] or market_conditions['near_resistance'] else 15) +
+            (20 if market_conditions['consolidating'] else 10) +
+            (10 if not market_conditions['trending'] else 5) +
             self._get_performance_bonus(7)
         )
         
         # Strategy 8: News Momentum
         strategy_scores[8] = (
-            (80 if market_conditions['news_driven'] else 10) +
-            (15 if market_conditions['volatile'] else 5) +
+            (90 if market_conditions['news_driven'] else 10) +
+            (10 if market_conditions['volatile'] else 5) +
             (5 if market_conditions['volume_surge'] else 0) +
             self._get_performance_bonus(8)
         )
@@ -960,14 +1089,14 @@ class AdvancedScalpingStrategies:
         return best_strategy, strategy_scores
     
     def _get_performance_bonus(self, strategy_id: int) -> float:
-        """Calculate performance bonus based on historical success"""
+        """Enhanced performance bonus calculation"""
         stats = self.strategy_stats[strategy_id]
         
         if stats['trades'] < 3:
             return 5  # Neutral bonus for new strategies
         
-        # Performance bonus (0-20 points)
-        success_bonus = (stats['success_rate'] / 100) * 15
+        # Performance bonus (0-25 points)
+        success_bonus = (stats['success_rate'] / 100) * 20
         
         # Recent usage penalty for diversity
         if stats['last_used']:
@@ -979,7 +1108,7 @@ class AdvancedScalpingStrategies:
         return success_bonus + recency_bonus
     
     def get_strategy_signals(self, strategy_id: int, symbol: str, market_conditions: Dict) -> Dict:
-        """Get strategy-specific trading signals"""
+        """Enhanced strategy signal generation"""
         
         try:
             ticker = yf.Ticker(f"{symbol}.NS")
@@ -991,47 +1120,45 @@ class AdvancedScalpingStrategies:
             current_price = data['Close'].iloc[-1]
             
             # Route to specific strategy methods
-            if strategy_id == 1:
-                return self._momentum_breakout_signals(data, market_conditions)
-            elif strategy_id == 2:
-                return self._mean_reversion_signals(data, market_conditions)
-            elif strategy_id == 3:
-                return self._volume_spike_signals(data, market_conditions)
-            elif strategy_id == 4:
-                return self._bollinger_squeeze_signals(data, market_conditions)
-            elif strategy_id == 5:
-                return self._rsi_divergence_signals(data, market_conditions)
-            elif strategy_id == 6:
-                return self._vwap_touch_signals(data, market_conditions)
-            elif strategy_id == 7:
-                return self._support_resistance_signals(data, market_conditions)
-            elif strategy_id == 8:
-                return self._news_momentum_signals(data, market_conditions)
+            strategy_methods = {
+                1: self._momentum_breakout_signals,
+                2: self._mean_reversion_signals,
+                3: self._volume_spike_signals,
+                4: self._bollinger_squeeze_signals,
+                5: self._rsi_divergence_signals,
+                6: self._vwap_touch_signals,
+                7: self._support_resistance_signals,
+                8: self._news_momentum_signals
+            }
             
-            return {'signal': 0, 'confidence': 0, 'entry_price': current_price, 'stop_pct': 0.005, 'reason': 'No signal'}
+            if strategy_id in strategy_methods:
+                return strategy_methods[strategy_id](data, market_conditions)
+            
+            return {'signal': 0, 'confidence': 0, 'entry_price': current_price, 'stop_pct': 0.005, 'reason': 'Invalid strategy'}
             
         except Exception as e:
             print(f"Strategy signal error: {e}")
             return {'signal': 0, 'confidence': 0, 'entry_price': 0, 'stop_pct': 0.005, 'reason': 'Error'}
     
+    # Individual strategy signal methods (keeping original logic but with enhanced error handling)
     def _momentum_breakout_signals(self, data, conditions):
-        """Strategy 1: Momentum Breakout signals"""
+        """Enhanced momentum breakout signals"""
         try:
             current_price = data['Close'].iloc[-1]
             high_20 = data['High'].rolling(20).max().iloc[-1]
             low_20 = data['Low'].rolling(20).min().iloc[-1]
             
-            breakout_up = current_price > high_20 * 1.001
-            breakout_down = current_price < low_20 * 0.999
+            breakout_up = current_price > high_20 * 1.002
+            breakout_down = current_price < low_20 * 0.998
             
             if breakout_up and conditions['volume_surge']:
                 return {
-                    'signal': 1, 'confidence': 0.8, 'entry_price': current_price,
+                    'signal': 1, 'confidence': 0.85, 'entry_price': current_price,
                     'stop_pct': 0.008, 'reason': 'Upward breakout with volume'
                 }
             elif breakout_down and conditions['volume_surge'] and conditions['trend_direction'] < 0:
                 return {
-                    'signal': -1, 'confidence': 0.8, 'entry_price': current_price,
+                    'signal': -1, 'confidence': 0.85, 'entry_price': current_price,
                     'stop_pct': 0.008, 'reason': 'Downward breakout with volume'
                 }
             
@@ -1040,19 +1167,19 @@ class AdvancedScalpingStrategies:
             return {'signal': 0, 'confidence': 0, 'entry_price': 0, 'stop_pct': 0.005, 'reason': 'Error'}
     
     def _mean_reversion_signals(self, data, conditions):
-        """Strategy 2: Mean Reversion signals"""
+        """Enhanced mean reversion signals"""
         try:
             current_price = data['Close'].iloc[-1]
             rsi = conditions['rsi']
             
             if rsi < 25 and conditions['bb_lower_touch']:
                 return {
-                    'signal': 1, 'confidence': 0.75, 'entry_price': current_price,
+                    'signal': 1, 'confidence': 0.80, 'entry_price': current_price,
                     'stop_pct': 0.006, 'reason': 'Oversold mean reversion'
                 }
             elif rsi > 75 and conditions['bb_upper_touch']:
                 return {
-                    'signal': -1, 'confidence': 0.75, 'entry_price': current_price,
+                    'signal': -1, 'confidence': 0.80, 'entry_price': current_price,
                     'stop_pct': 0.006, 'reason': 'Overbought mean reversion'
                 }
             
@@ -1061,15 +1188,16 @@ class AdvancedScalpingStrategies:
             return {'signal': 0, 'confidence': 0, 'entry_price': 0, 'stop_pct': 0.005, 'reason': 'Error'}
     
     def _volume_spike_signals(self, data, conditions):
-        """Strategy 3: Volume Spike signals"""
+        """Enhanced volume spike signals"""
         try:
             current_price = data['Close'].iloc[-1]
             price_change = data['Close'].pct_change().iloc[-1] * 100
             
-            if conditions['volume_surge'] and abs(price_change) > 0.3:
+            if conditions['volume_surge'] and abs(price_change) > 0.4:
                 signal = 1 if price_change > 0 else -1
+                confidence = min(0.90, conditions['volume_ratio'] * 0.3)
                 return {
-                    'signal': signal, 'confidence': 0.85, 'entry_price': current_price,
+                    'signal': signal, 'confidence': confidence, 'entry_price': current_price,
                     'stop_pct': 0.007, 'reason': f'Volume spike with {abs(price_change):.2f}% move'
                 }
             
@@ -1078,14 +1206,14 @@ class AdvancedScalpingStrategies:
             return {'signal': 0, 'confidence': 0, 'entry_price': 0, 'stop_pct': 0.005, 'reason': 'Error'}
     
     def _bollinger_squeeze_signals(self, data, conditions):
-        """Strategy 4: Bollinger Squeeze signals"""
+        """Enhanced Bollinger squeeze signals"""
         try:
             current_price = data['Close'].iloc[-1]
             
             if conditions['bb_squeeze'] and conditions['consolidating']:
                 signal = conditions['trend_direction']
                 return {
-                    'signal': signal, 'confidence': 0.7, 'entry_price': current_price,
+                    'signal': signal, 'confidence': 0.75, 'entry_price': current_price,
                     'stop_pct': 0.005, 'reason': 'Bollinger squeeze breakout'
                 }
             
@@ -1094,19 +1222,19 @@ class AdvancedScalpingStrategies:
             return {'signal': 0, 'confidence': 0, 'entry_price': 0, 'stop_pct': 0.005, 'reason': 'Error'}
     
     def _rsi_divergence_signals(self, data, conditions):
-        """Strategy 5: RSI Divergence signals"""
+        """Enhanced RSI divergence signals"""
         try:
             current_price = data['Close'].iloc[-1]
             rsi = conditions['rsi']
             
             if rsi < 30 and conditions['near_support']:
                 return {
-                    'signal': 1, 'confidence': 0.65, 'entry_price': current_price,
+                    'signal': 1, 'confidence': 0.70, 'entry_price': current_price,
                     'stop_pct': 0.006, 'reason': 'RSI oversold at support'
                 }
             elif rsi > 70 and conditions['near_resistance']:
                 return {
-                    'signal': -1, 'confidence': 0.65, 'entry_price': current_price,
+                    'signal': -1, 'confidence': 0.70, 'entry_price': current_price,
                     'stop_pct': 0.006, 'reason': 'RSI overbought at resistance'
                 }
             
@@ -1115,19 +1243,19 @@ class AdvancedScalpingStrategies:
             return {'signal': 0, 'confidence': 0, 'entry_price': 0, 'stop_pct': 0.005, 'reason': 'Error'}
     
     def _vwap_touch_signals(self, data, conditions):
-        """Strategy 6: VWAP Touch signals"""
+        """Enhanced VWAP touch signals"""
         try:
             current_price = data['Close'].iloc[-1]
             
             if conditions['vwap_distance'] < 0.003:
                 if conditions['above_vwap'] and conditions['volume_surge']:
                     return {
-                        'signal': 1, 'confidence': 0.7, 'entry_price': current_price,
+                        'signal': 1, 'confidence': 0.75, 'entry_price': current_price,
                         'stop_pct': 0.005, 'reason': 'VWAP support with volume'
                     }
                 elif not conditions['above_vwap'] and conditions['volume_surge']:
                     return {
-                        'signal': -1, 'confidence': 0.7, 'entry_price': current_price,
+                        'signal': -1, 'confidence': 0.75, 'entry_price': current_price,
                         'stop_pct': 0.005, 'reason': 'VWAP resistance with volume'
                     }
             
@@ -1136,18 +1264,18 @@ class AdvancedScalpingStrategies:
             return {'signal': 0, 'confidence': 0, 'entry_price': 0, 'stop_pct': 0.005, 'reason': 'Error'}
     
     def _support_resistance_signals(self, data, conditions):
-        """Strategy 7: Support/Resistance signals"""
+        """Enhanced support/resistance signals"""
         try:
             current_price = data['Close'].iloc[-1]
             
-            if conditions['near_support'] and conditions['rsi'] < 40:
+            if conditions['near_support'] and conditions['rsi'] < 45:
                 return {
-                    'signal': 1, 'confidence': 0.75, 'entry_price': current_price,
+                    'signal': 1, 'confidence': 0.80, 'entry_price': current_price,
                     'stop_pct': 0.004, 'reason': 'Support level bounce'
                 }
-            elif conditions['near_resistance'] and conditions['rsi'] > 60:
+            elif conditions['near_resistance'] and conditions['rsi'] > 55:
                 return {
-                    'signal': -1, 'confidence': 0.75, 'entry_price': current_price,
+                    'signal': -1, 'confidence': 0.80, 'entry_price': current_price,
                     'stop_pct': 0.004, 'reason': 'Resistance level rejection'
                 }
             
@@ -1156,13 +1284,13 @@ class AdvancedScalpingStrategies:
             return {'signal': 0, 'confidence': 0, 'entry_price': 0, 'stop_pct': 0.005, 'reason': 'Error'}
     
     def _news_momentum_signals(self, data, conditions):
-        """Strategy 8: News Momentum signals"""
+        """Enhanced news momentum signals"""
         try:
             current_price = data['Close'].iloc[-1]
             
             if conditions['news_driven']:
                 signal = conditions['trend_direction']
-                confidence = min(0.9, conditions['volume_ratio'] * 0.3)
+                confidence = min(0.95, conditions['volume_ratio'] * 0.35)
                 
                 return {
                     'signal': signal, 'confidence': confidence, 'entry_price': current_price,
@@ -1174,7 +1302,7 @@ class AdvancedScalpingStrategies:
             return {'signal': 0, 'confidence': 0, 'entry_price': 0, 'stop_pct': 0.005, 'reason': 'Error'}
     
     def update_strategy_performance(self, strategy_id: int, trade_result: Dict):
-        """Update strategy performance statistics"""
+        """Enhanced strategy performance tracking"""
         stats = self.strategy_stats[strategy_id]
         
         stats['trades'] += 1
@@ -1199,45 +1327,48 @@ class AdvancedScalpingStrategies:
 # ==================== PRODUCTION SCALPING BOT ====================
 
 class ProductionScalpingBot:
-    """Production-ready scalping bot with complete 8-strategy system"""
+    """Enhanced production-ready scalping bot"""
     
     def __init__(self):
-        self.api = ProperGoodwillIntegration()
-        self.strategies = AdvancedScalpingStrategies()
+        self.api = CompleteGoodwillIntegration()
+        self.strategies = EnhancedScalpingStrategies()
         self.is_running = False
         self.capital = 100000.0
         self.positions = {}
         self.trades = []
         self.signals = []
         self.pnl = 0.0
-        self.mode = "PAPER"  # PAPER or LIVE
+        self.mode = "PAPER"
         
-        # Trading parameters
+        # Enhanced trading parameters
         self.max_positions = 4
         self.risk_per_trade = 0.15  # 15% per trade
-        self.max_hold_time = 180  # 3 minutes in seconds
+        self.max_hold_time = 180  # 3 minutes
         self.risk_reward_ratio = 2.0  # 1:2
         
-        # Risk management
+        # Enhanced risk management
         self.daily_loss_limit = 0.05  # 5% daily loss limit
         self.max_drawdown_limit = 0.10  # 10% max drawdown
         self.daily_pnl = 0.0
         self.peak_capital = self.capital
         self.current_drawdown = 0.0
         
-        # Market scanning symbols
+        # Enhanced symbol list
         self.symbols = [
             "HDFCBANK", "ICICIBANK", "SBIN", "KOTAKBANK", "AXISBANK",
-            "BAJFINANCE", "RELIANCE", "INFY", "TCS", "ADANIPORTS"
+            "BAJFINANCE", "RELIANCE", "INFY", "TCS", "ADANIPORTS",
+            "WIPRO", "LT", "TITAN", "MARUTI", "BHARTIARTL"
         ]
         
         self.init_database()
     
     def init_database(self):
-        """Initialize production database"""
+        """Enhanced database initialization"""
         try:
             self.conn = sqlite3.connect('production_scalping_trades.db', check_same_thread=False)
             cursor = self.conn.cursor()
+            
+            # Enhanced trades table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS trades (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1245,7 +1376,8 @@ class ProductionScalpingBot:
                     entry_price REAL, exit_price REAL, quantity INTEGER,
                     pnl REAL, hold_time REAL, strategy_id INTEGER,
                     strategy_name TEXT, exit_reason TEXT, confidence REAL,
-                    order_id TEXT, mode TEXT, connection_method TEXT
+                    order_id TEXT, mode TEXT, connection_method TEXT,
+                    market_conditions TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
             
@@ -1254,7 +1386,19 @@ class ProductionScalpingBot:
                     date TEXT PRIMARY KEY,
                     total_trades INTEGER, winning_trades INTEGER,
                     total_pnl REAL, max_drawdown REAL, 
-                    capital_used REAL, best_strategy TEXT
+                    capital_used REAL, best_strategy TEXT,
+                    connection_method TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            
+            # Strategy performance table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS strategy_performance (
+                    strategy_id INTEGER PRIMARY KEY,
+                    strategy_name TEXT, total_trades INTEGER,
+                    wins INTEGER, total_pnl REAL, success_rate REAL,
+                    avg_profit REAL, avg_loss REAL, avg_hold_time REAL,
+                    last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
             
@@ -1263,41 +1407,45 @@ class ProductionScalpingBot:
             st.error(f"Database initialization error: {e}")
     
     def check_risk_limits(self) -> bool:
-        """Check if risk limits are breached"""
-        # Update current drawdown
-        self.current_drawdown = max(0, self.peak_capital - self.capital)
-        
-        # Check daily loss limit
-        daily_loss_amount = self.capital * self.daily_loss_limit
-        if self.daily_pnl < -daily_loss_amount:
-            st.error(f"🛑 Daily loss limit breached: ₹{self.daily_pnl:.2f}")
+        """Enhanced risk limit checking"""
+        try:
+            # Update current drawdown
+            self.current_drawdown = max(0, self.peak_capital - self.capital)
+            
+            # Check daily loss limit
+            daily_loss_amount = self.capital * self.daily_loss_limit
+            if self.daily_pnl < -daily_loss_amount:
+                st.error(f"🛑 Daily loss limit breached: ₹{self.daily_pnl:.2f}")
+                return False
+            
+            # Check max drawdown
+            max_drawdown_amount = self.capital * self.max_drawdown_limit
+            if self.current_drawdown > max_drawdown_amount:
+                st.error(f"🛑 Max drawdown limit breached: ₹{self.current_drawdown:.2f}")
+                return False
+            
+            return True
+        except Exception as e:
+            st.error(f"Risk check error: {e}")
             return False
-        
-        # Check max drawdown
-        max_drawdown_amount = self.capital * self.max_drawdown_limit
-        if self.current_drawdown > max_drawdown_amount:
-            st.error(f"🛑 Max drawdown limit breached: ₹{self.current_drawdown:.2f}")
-            return False
-        
-        return True
     
     def scan_for_opportunities(self):
-        """Enhanced market scanning with 8 strategies"""
+        """Enhanced opportunity scanning with better error handling"""
         opportunities = []
         
-        for symbol in self.symbols:
+        for symbol in self.symbols[:8]:  # Scan first 8 symbols for performance
             try:
-                # Get live data - prefer Goodwill API, fallback to yfinance
+                # Get live data with multiple sources
                 live_data = None
                 data_source = "yfinance"
                 
                 if self.api.is_connected:
                     live_data = self.api.get_quote(symbol)
-                    if live_data:
+                    if live_data and live_data['price'] > 0:
                         data_source = f"Goodwill ({self.api.connection_method})"
                 
-                # Fallback to yfinance if Goodwill data unavailable
-                if not live_data:
+                # Fallback to yfinance if needed
+                if not live_data or live_data['price'] <= 0:
                     try:
                         ticker = yf.Ticker(f"{symbol}.NS")
                         hist = ticker.history(period="1d", interval="1m")
@@ -1310,6 +1458,7 @@ class ProductionScalpingBot:
                                 'low': float(latest['Low']),
                                 'timestamp': datetime.now()
                             }
+                            data_source = "yfinance (fallback)"
                     except:
                         continue
                 
@@ -1325,8 +1474,11 @@ class ProductionScalpingBot:
                 # Get strategy-specific signals
                 signals = self.strategies.get_strategy_signals(strategy_id, symbol, market_conditions)
                 
-                # Only consider high-confidence signals
-                if signals['signal'] != 0 and signals['confidence'] > 0.70:
+                # Enhanced signal filtering
+                if (signals['signal'] != 0 and 
+                    signals['confidence'] > 0.75 and 
+                    len(self.positions) < self.max_positions):
+                    
                     opportunity = {
                         'symbol': symbol,
                         'strategy_id': strategy_id,
@@ -1348,12 +1500,12 @@ class ProductionScalpingBot:
                 print(f"Scanning error for {symbol}: {e}")
                 continue
         
-        # Sort by confidence and filter top opportunities
+        # Sort by confidence and return top opportunities
         opportunities.sort(key=lambda x: x['confidence'], reverse=True)
-        return opportunities[:2]  # Top 2 opportunities only
+        return opportunities[:3]  # Top 3 opportunities
     
     def calculate_position_size(self, symbol, entry_price, stop_pct):
-        """Calculate position size with production risk management"""
+        """Enhanced position sizing with improved risk management"""
         try:
             # Base risk amount
             risk_amount = self.capital * self.risk_per_trade
@@ -1363,6 +1515,12 @@ class ProductionScalpingBot:
                 risk_reduction = min(0.5, self.current_drawdown / (self.capital * 0.05))
                 risk_amount *= (1 - risk_reduction)
             
+            # Adjust for market volatility
+            if stop_pct > 0.008:  # High volatility
+                risk_amount *= 0.8
+            elif stop_pct < 0.004:  # Low volatility
+                risk_amount *= 1.2
+            
             # Calculate quantity based on stop loss
             stop_loss_amount = entry_price * stop_pct
             
@@ -1370,7 +1528,7 @@ class ProductionScalpingBot:
                 quantity = int(risk_amount / stop_loss_amount)
                 
                 # Apply position size limits
-                max_quantity = min(1000, int(self.capital * 0.1 / entry_price))  # Max 10% of capital per position
+                max_quantity = min(2000, int(self.capital * 0.12 / entry_price))
                 quantity = max(1, min(quantity, max_quantity))
                 
                 return quantity
@@ -1382,13 +1540,12 @@ class ProductionScalpingBot:
             return 1
     
     def execute_entry(self, opportunity):
-        """Execute entry with production safeguards"""
+        """Enhanced entry execution with better validation"""
         try:
-            # Check risk limits before entry
+            # Pre-execution checks
             if not self.check_risk_limits():
                 return None
             
-            # Check position limits
             if len(self.positions) >= self.max_positions:
                 return None
             
@@ -1401,9 +1558,9 @@ class ProductionScalpingBot:
             confidence = opportunity['confidence']
             
             quantity = self.calculate_position_size(symbol, entry_price, stop_pct)
-            action = "B" if signal > 0 else "S"  # Goodwill API uses B/S
+            action = "B" if signal > 0 else "S"
             
-            # Calculate stop loss and target
+            # Enhanced stop loss and target calculation
             if action == "B":
                 stop_loss = entry_price * (1 - stop_pct)
                 target = entry_price * (1 + (stop_pct * self.risk_reward_ratio))
@@ -1411,19 +1568,17 @@ class ProductionScalpingBot:
                 stop_loss = entry_price * (1 + stop_pct)
                 target = entry_price * (1 - (stop_pct * self.risk_reward_ratio))
             
-            # Place order based on mode
+            # Place order
             order_id = None
             
             if self.mode == "LIVE" and self.api.is_connected:
-                # Place real order
                 order_id = self.api.place_order(symbol, action, quantity, entry_price, "MKT", "MIS")
                 if not order_id:
                     st.error(f"❌ Failed to place live order for {symbol}")
                     return None
             else:
-                # Paper trading
                 order_id = f"PAPER_{int(datetime.now().timestamp())}"
-                st.info(f"📝 PAPER TRADE: {action} {quantity} {symbol} @ ₹{entry_price:.2f} | Strategy: {strategy_name} | Confidence: {confidence:.1%} | Data: {opportunity['data_source']}")
+                st.info(f"📝 PAPER: {action} {quantity} {symbol} @ ₹{entry_price:.2f} | Strategy: {strategy_name} | Confidence: {confidence:.1%}")
             
             if order_id:
                 position_id = f"{symbol}_{int(datetime.now().timestamp())}"
@@ -1444,10 +1599,11 @@ class ProductionScalpingBot:
                     'trailing_stop': stop_loss,
                     'highest_profit': 0,
                     'lowest_profit': 0,
-                    'data_source': opportunity['data_source']
+                    'data_source': opportunity['data_source'],
+                    'market_conditions': opportunity['market_conditions']
                 }
                 
-                st.success(f"🚀 Position Opened: {action} {quantity} {symbol} @ ₹{entry_price:.2f} | Strategy: {strategy_name} | Mode: {self.mode}")
+                st.success(f"🚀 Position Opened: {action} {quantity} {symbol} @ ₹{entry_price:.2f} | Strategy: {strategy_name}")
                 return position_id
             
             return None
@@ -1457,139 +1613,181 @@ class ProductionScalpingBot:
             return None
     
     def update_position_tracking(self, position_id, current_price):
-        """Update position with advanced tracking"""
-        position = self.positions[position_id]
-        
-        # Calculate current P&L
-        if position['action'] == 'B':
-            current_pnl = (current_price - position['entry_price']) * position['quantity']
-        else:
-            current_pnl = (position['entry_price'] - current_price) * position['quantity']
-        
-        # Update profit tracking
-        position['highest_profit'] = max(position['highest_profit'], current_pnl)
-        position['lowest_profit'] = min(position['lowest_profit'], current_pnl)
-        
-        # Dynamic trailing stop
-        if current_pnl > 0:
-            profit_factor = current_pnl / (position['entry_price'] * position['quantity'] * position['stop_pct'])
-            trail_tightening = min(0.5, profit_factor * 0.1)
+        """Enhanced position tracking with advanced trailing stop"""
+        try:
+            position = self.positions[position_id]
             
+            # Calculate current P&L
             if position['action'] == 'B':
-                new_stop = current_price * (1 - position['stop_pct'] * (1 - trail_tightening))
-                position['trailing_stop'] = max(position['trailing_stop'], new_stop)
+                current_pnl = (current_price - position['entry_price']) * position['quantity']
             else:
-                new_stop = current_price * (1 + position['stop_pct'] * (1 - trail_tightening))
-                position['trailing_stop'] = min(position['trailing_stop'], new_stop)
+                current_pnl = (position['entry_price'] - current_price) * position['quantity']
+            
+            # Update profit tracking
+            position['highest_profit'] = max(position['highest_profit'], current_pnl)
+            position['lowest_profit'] = min(position['lowest_profit'], current_pnl)
+            
+            # Enhanced dynamic trailing stop
+            if current_pnl > 0:
+                profit_ratio = current_pnl / (position['entry_price'] * position['quantity'] * position['stop_pct'])
+                
+                # Progressive trail tightening
+                if profit_ratio > 2:  # 2x risk achieved
+                    trail_factor = 0.3  # Tighten to 30% of original stop
+                elif profit_ratio > 1:  # 1x risk achieved
+                    trail_factor = 0.5  # Tighten to 50% of original stop
+                else:
+                    trail_factor = 0.8  # Keep 80% of original stop
+                
+                if position['action'] == 'B':
+                    new_stop = current_price * (1 - position['stop_pct'] * trail_factor)
+                    position['trailing_stop'] = max(position['trailing_stop'], new_stop)
+                else:
+                    new_stop = current_price * (1 + position['stop_pct'] * trail_factor)
+                    position['trailing_stop'] = min(position['trailing_stop'], new_stop)
+                    
+        except Exception as e:
+            print(f"Position tracking error: {e}")
     
     def check_exit_conditions(self, position_id, current_price):
-        """Check comprehensive exit conditions"""
-        position = self.positions[position_id]
-        
-        # Time-based exit
-        hold_time = (datetime.now() - position['entry_time']).total_seconds()
-        if hold_time > self.max_hold_time:
-            return "TIME_EXIT"
-        
-        # Update position tracking
-        self.update_position_tracking(position_id, current_price)
-        
-        # Stop loss check
-        if position['action'] == 'B':
-            if current_price <= position['trailing_stop']:
-                return "STOP_LOSS"
-            if current_price >= position['target']:
-                return "TARGET_HIT"
-        else:
-            if current_price >= position['trailing_stop']:
-                return "STOP_LOSS"
-            if current_price <= position['target']:
-                return "TARGET_HIT"
-        
-        # Risk management exits
-        current_pnl = position['highest_profit'] if position['highest_profit'] > 0 else position['lowest_profit']
-        position_risk = abs(current_pnl) / self.capital
-        
-        if position_risk > self.risk_per_trade * 1.5:  # 150% of intended risk
-            return "RISK_LIMIT"
-        
-        return None
+        """Enhanced exit condition checking"""
+        try:
+            position = self.positions[position_id]
+            
+            # Time-based exit
+            hold_time = (datetime.now() - position['entry_time']).total_seconds()
+            if hold_time > self.max_hold_time:
+                return "TIME_EXIT"
+            
+            # Update position tracking
+            self.update_position_tracking(position_id, current_price)
+            
+            # Stop loss check
+            if position['action'] == 'B':
+                if current_price <= position['trailing_stop']:
+                    return "STOP_LOSS"
+                if current_price >= position['target']:
+                    return "TARGET_HIT"
+            else:
+                if current_price >= position['trailing_stop']:
+                    return "STOP_LOSS"
+                if current_price <= position['target']:
+                    return "TARGET_HIT"
+            
+            # Enhanced risk management exits
+            current_pnl = (
+                (current_price - position['entry_price']) * position['quantity'] 
+                if position['action'] == 'B' 
+                else (position['entry_price'] - current_price) * position['quantity']
+            )
+            
+            position_risk = abs(current_pnl) / self.capital
+            
+            if position_risk > self.risk_per_trade * 1.8:  # 180% of intended risk
+                return "RISK_LIMIT"
+            
+            # Profit protection exit
+            if (position['highest_profit'] > 0 and 
+                current_pnl < position['highest_profit'] * 0.3 and 
+                hold_time > 60):  # Protect 70% of peak profit after 1 minute
+                return "PROFIT_PROTECTION"
+            
+            return None
+            
+        except Exception as e:
+            print(f"Exit condition check error: {e}")
+            return None
     
     def close_position(self, position_id, exit_price, exit_reason):
-        """Close position with production logging"""
+        """Enhanced position closing with comprehensive logging"""
         if position_id not in self.positions:
             return
         
-        position = self.positions.pop(position_id)
-        
-        # Calculate final P&L
-        if position['action'] == 'B':
-            pnl = (exit_price - position['entry_price']) * position['quantity']
-        else:
-            pnl = (position['entry_price'] - exit_price) * position['quantity']
-        
-        # Update capital and tracking
-        self.capital += pnl
-        self.pnl += pnl
-        self.daily_pnl += pnl
-        
-        # Update peak capital for drawdown calculation
-        if self.capital > self.peak_capital:
-            self.peak_capital = self.capital
-        
-        hold_time = (datetime.now() - position['entry_time']).total_seconds()
-        
-        # Create trade record
-        trade_record = {
-            'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            'symbol': position['symbol'],
-            'action': f"CLOSE_{position['action']}",
-            'entry_price': position['entry_price'],
-            'exit_price': exit_price,
-            'quantity': position['quantity'],
-            'pnl': round(pnl, 2),
-            'hold_time': round(hold_time, 1),
-            'strategy_id': position['strategy_id'],
-            'strategy_name': position['strategy_name'],
-            'exit_reason': exit_reason,
-            'confidence': position['confidence'],
-            'order_id': position['order_id'],
-            'mode': self.mode,
-            'connection_method': self.api.connection_method or 'yfinance'
-        }
-        
-        self.trades.append(trade_record)
-        
-        # Save to database
         try:
-            cursor = self.conn.cursor()
-            cursor.execute('''
-                INSERT INTO trades VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', tuple(trade_record.values()))
-            self.conn.commit()
+            position = self.positions.pop(position_id)
+            
+            # Calculate final P&L
+            if position['action'] == 'B':
+                pnl = (exit_price - position['entry_price']) * position['quantity']
+            else:
+                pnl = (position['entry_price'] - exit_price) * position['quantity']
+            
+            # Update capital and tracking
+            self.capital += pnl
+            self.pnl += pnl
+            self.daily_pnl += pnl
+            
+            # Update peak capital for drawdown calculation
+            if self.capital > self.peak_capital:
+                self.peak_capital = self.capital
+            
+            hold_time = (datetime.now() - position['entry_time']).total_seconds()
+            
+            # Create comprehensive trade record
+            trade_record = {
+                'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                'symbol': position['symbol'],
+                'action': f"CLOSE_{position['action']}",
+                'entry_price': position['entry_price'],
+                'exit_price': exit_price,
+                'quantity': position['quantity'],
+                'pnl': round(pnl, 2),
+                'hold_time': round(hold_time, 1),
+                'strategy_id': position['strategy_id'],
+                'strategy_name': position['strategy_name'],
+                'exit_reason': exit_reason,
+                'confidence': position['confidence'],
+                'order_id': position['order_id'],
+                'mode': self.mode,
+                'connection_method': self.api.connection_method or 'yfinance',
+                'market_conditions': json.dumps(position.get('market_conditions', {})),
+                'data_source': position['data_source']
+            }
+            
+            self.trades.append(trade_record)
+            
+            # Enhanced database logging
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute('''
+                    INSERT INTO trades VALUES (
+                        NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL
+                    )
+                ''', (
+                    trade_record['timestamp'], trade_record['symbol'], trade_record['action'],
+                    trade_record['entry_price'], trade_record['exit_price'], trade_record['quantity'],
+                    trade_record['pnl'], trade_record['hold_time'], trade_record['strategy_id'],
+                    trade_record['strategy_name'], trade_record['exit_reason'], trade_record['confidence'],
+                    trade_record['order_id'], trade_record['mode'], trade_record['connection_method'],
+                    trade_record['market_conditions']
+                ))
+                self.conn.commit()
+            except Exception as e:
+                print(f"Database save error: {e}")
+            
+            # Update strategy performance
+            self.strategies.update_strategy_performance(position['strategy_id'], {
+                'pnl': pnl,
+                'hold_time': hold_time,
+                'exit_reason': exit_reason
+            })
+            
+            # Place exit order if live mode
+            exit_action = "S" if position['action'] == "B" else "B"
+            
+            if self.mode == "LIVE" and self.api.is_connected:
+                self.api.place_order(position['symbol'], exit_action, position['quantity'], exit_price, "MKT", "MIS")
+            else:
+                st.info(f"📝 PAPER EXIT: {exit_action} {position['quantity']} {position['symbol']} @ ₹{exit_price:.2f}")
+            
+            pnl_color = "🟢" if pnl >= 0 else "🔴"
+            st.info(f"✅ Position Closed: {position['symbol']} | {pnl_color} P&L: ₹{pnl:.2f} | Strategy: {position['strategy_name']} | Reason: {exit_reason}")
+            
         except Exception as e:
-            print(f"Database save error: {e}")
-        
-        # Update strategy performance
-        self.strategies.update_strategy_performance(position['strategy_id'], {
-            'pnl': pnl,
-            'hold_time': hold_time,
-            'exit_reason': exit_reason
-        })
-        
-        # Place exit order if live mode
-        exit_action = "S" if position['action'] == "B" else "B"
-        
-        if self.mode == "LIVE" and self.api.is_connected:
-            self.api.place_order(position['symbol'], exit_action, position['quantity'], exit_price, "MKT", "MIS")
-        else:
-            st.info(f"📝 PAPER EXIT: {exit_action} {position['quantity']} {position['symbol']} @ ₹{exit_price:.2f} | Data: {position['data_source']}")
-        
-        pnl_color = "🟢" if pnl >= 0 else "🔴"
-        st.info(f"✅ Position Closed: {position['symbol']} | {pnl_color} P&L: ₹{pnl:.2f} | Strategy: {position['strategy_name']} | Reason: {exit_reason}")
+            st.error(f"Position closing error: {e}")
     
     def run_trading_cycle(self):
-        """Main production trading cycle"""
+        """Enhanced main trading cycle with better error handling"""
         try:
             # Check risk limits before any trading
             if not self.check_risk_limits():
@@ -1597,22 +1795,13 @@ class ProductionScalpingBot:
                 st.error("🛑 Trading stopped due to risk limits")
                 return
             
-            # Scan for new opportunities
-            opportunities = self.scan_for_opportunities()
-            
-            # Execute entries for valid opportunities
-            for opp in opportunities:
-                if len(self.positions) < self.max_positions:
-                    self.execute_entry(opp)
-                    time.sleep(1)  # Prevent rapid-fire orders
-            
-            # Check exit conditions for existing positions
+            # Check exit conditions for existing positions first
             positions_to_close = []
             
             for pos_id in list(self.positions.keys()):
                 position = self.positions[pos_id]
                 
-                # Get current price from appropriate source
+                # Get current price from best available source
                 current_price = position['entry_price']  # Default fallback
                 
                 try:
@@ -1626,8 +1815,8 @@ class ProductionScalpingBot:
                         hist = ticker.history(period="1d", interval="1m")
                         if len(hist) > 0:
                             current_price = float(hist.iloc[-1]['Close'])
-                except:
-                    pass  # Use entry price as fallback
+                except Exception as e:
+                    print(f"Price fetch error for {position['symbol']}: {e}")
                 
                 # Check exit conditions
                 exit_reason = self.check_exit_conditions(pos_id, current_price)
@@ -1638,25 +1827,39 @@ class ProductionScalpingBot:
             for pos_id, exit_price, exit_reason in positions_to_close:
                 self.close_position(pos_id, exit_price, exit_reason)
                 time.sleep(0.5)  # Brief delay between closes
+            
+            # Scan for new opportunities if we have room
+            if len(self.positions) < self.max_positions:
+                opportunities = self.scan_for_opportunities()
                 
+                for opp in opportunities:
+                    if len(self.positions) < self.max_positions:
+                        self.execute_entry(opp)
+                        time.sleep(1)  # Prevent rapid-fire orders
+                        break  # Only take one position per cycle
+                        
         except Exception as e:
             st.error(f"Trading cycle error: {e}")
     
     def get_performance_metrics(self):
-        """Get comprehensive performance metrics"""
+        """Enhanced performance metrics calculation"""
         if not self.trades:
             return {
                 'total_trades': 0, 'win_rate': 0, 'total_pnl': 0,
                 'avg_trade': 0, 'max_profit': 0, 'max_loss': 0, 'avg_hold_time': 0,
                 'best_strategy': 'N/A', 'strategy_breakdown': {}, 'sharpe_ratio': 0,
                 'max_drawdown': round(self.current_drawdown, 2), 'profit_factor': 0, 
-                'daily_pnl': round(self.daily_pnl, 2), 'winning_trades': 0, 'losing_trades': 0
+                'daily_pnl': round(self.daily_pnl, 2), 'winning_trades': 0, 'losing_trades': 0,
+                'avg_win': 0, 'avg_loss': 0, 'largest_win': 0, 'largest_loss': 0
             }
         
         pnls = [trade['pnl'] for trade in self.trades]
         hold_times = [trade['hold_time'] for trade in self.trades]
         winning_trades = len([p for p in pnls if p > 0])
         losing_trades = len([p for p in pnls if p < 0])
+        
+        wins = [p for p in pnls if p > 0]
+        losses = [p for p in pnls if p < 0]
         
         # Strategy breakdown
         strategy_breakdown = {}
@@ -1678,13 +1881,14 @@ class ProductionScalpingBot:
                 ) * 100
         
         # Advanced metrics
-        total_profits = sum([p for p in pnls if p > 0]) or 1
-        total_losses = abs(sum([p for p in pnls if p < 0])) or 1
+        total_profits = sum(wins) if wins else 1
+        total_losses = abs(sum(losses)) if losses else 1
         profit_factor = total_profits / total_losses
         
+        # Sharpe ratio (simplified)
         sharpe_ratio = 0
         if len(pnls) > 1 and np.std(pnls) > 0:
-            sharpe_ratio = np.mean(pnls) / np.std(pnls)
+            sharpe_ratio = (np.mean(pnls) / np.std(pnls)) * np.sqrt(252)  # Annualized
         
         best_strategy = 'N/A'
         if strategy_breakdown:
@@ -1706,76 +1910,50 @@ class ProductionScalpingBot:
             'profit_factor': round(profit_factor, 2),
             'daily_pnl': round(self.daily_pnl, 2),
             'winning_trades': winning_trades,
-            'losing_trades': losing_trades
+            'losing_trades': losing_trades,
+            'avg_win': round(np.mean(wins), 2) if wins else 0,
+            'avg_loss': round(np.mean(losses), 2) if losses else 0,
+            'largest_win': round(max(wins), 2) if wins else 0,
+            'largest_loss': round(min(losses), 2) if losses else 0
         }
 
 # ==================== STREAMLIT APPLICATION ====================
 
-def show_production_disclaimer():
-    """Show production trading disclaimer"""
+def show_enhanced_disclaimer():
+    """Show enhanced production disclaimer"""
     st.markdown("""
-    <div style="background-color: #ffebee; padding: 15px; border-radius: 10px; border-left: 5px solid #f44336; margin: 10px 0;">
-        <h4 style="color: #d32f2f; margin-top: 0;">⚠️ PRODUCTION TRADING SYSTEM</h4>
-        <p style="margin-bottom: 0;"><strong>This bot uses REAL Goodwill API and can place actual orders.</strong></p>
+    <div style="background-color: #e8f5e8; padding: 15px; border-radius: 10px; border-left: 5px solid #4caf50; margin: 10px 0;">
+        <h4 style="color: #2e7d32; margin-top: 0;">✅ COMPLETE FIXED VERSION - Production Ready</h4>
+        <p style="margin-bottom: 0;"><strong>This version includes all major fixes and enhancements:</strong></p>
         <ul style="margin: 10px 0;">
-            <li>✅ <strong>gwcmodel Integration:</strong> Official Goodwill library as primary method</li>
-            <li>⚠️ <strong>Live Mode:</strong> Places actual orders with real money</li>
-            <li>🛡️ <strong>Risk Limits:</strong> 5% daily loss limit, 10% max drawdown</li>
-            <li>🎯 <strong>8 Strategies:</strong> Intelligent strategy selection based on market conditions</li>
+            <li>🔧 <strong>Enhanced gwcmodel Detection:</strong> Comprehensive class scanning and initialization</li>
+            <li>🎫 <strong>Proper Request Token Flow:</strong> Complete implementation per official documentation</li>
+            <li>🔗 <strong>URL Parser:</strong> Automatic request_token extraction from redirect URLs</li>
+            <li>🔐 <strong>Multiple Auth Methods:</strong> gwcmodel + Direct API with robust fallbacks</li>
+            <li>🎯 <strong>8 Advanced Strategies:</strong> Enhanced with improved signal generation</li>
+            <li>🛡️ <strong>Production Risk Management:</strong> 5% daily loss, 10% max drawdown limits</li>
+            <li>📊 <strong>Enhanced Performance Tracking:</strong> Comprehensive metrics and analytics</li>
         </ul>
-        <p style="margin-bottom: 0;"><strong>Always test in Paper Mode before using Live Mode!</strong></p>
     </div>
     """, unsafe_allow_html=True)
 
-def show_gwcmodel_status():
-    """Show gwcmodel status and installation info"""
-    st.sidebar.markdown("### 🔧 gwcmodel Status")
+def show_gwcmodel_diagnostics():
+    """Show comprehensive gwcmodel diagnostics"""
+    st.sidebar.markdown("### 🔧 gwcmodel Diagnostics")
     
-    if GWCMODEL_AVAILABLE:
-        if GWC_CLASS:
-            st.sidebar.success(f"✅ gwcmodel.{GWC_CLASS_NAME} available")
+    status = bot.api.get_gwcmodel_status()
+    
+    if status['available']:
+        if status['class_found']:
+            st.sidebar.success(f"✅ {status['class_name']} available")
         else:
-            st.sidebar.error("❌ gwcmodel installed but no valid class found")
-            try:
-                import gwcmodel
-                available_attrs = [attr for attr in dir(gwcmodel) if not attr.startswith('_')]
-                st.sidebar.code(f"Available: {available_attrs}")
-            except:
-                pass
+            st.sidebar.error("❌ No valid class found")
+            if status['attributes']:
+                st.sidebar.code(f"Found: {', '.join(status['attributes'][:3])}...")
+                st.sidebar.text(f"Total: {status['total_attributes']} attributes")
     else:
         st.sidebar.error("❌ gwcmodel not installed")
         st.sidebar.code("pip install gwcmodel")
-
-def show_api_instructions():
-    """Show comprehensive API setup instructions"""
-    with st.expander("📋 Goodwill API Setup Guide", expanded=False):
-        st.markdown("""
-        ### 🔧 Complete Setup Instructions
-        
-        **Method 1: gwcmodel Credentials (Recommended)**
-        1. Install gwcmodel: `pip install gwcmodel`
-        2. Get API credentials from [developer.gwcindia.in](https://developer.gwcindia.in)
-        3. Use your Goodwill trading account credentials
-        4. Enter API Key, User ID, Password (and TOTP if 2FA enabled)
-        
-        **Method 2: Request Token (Alternative)**
-        1. Visit: `https://api.gwcindia.in/v1/login?api_key=YOUR_API_KEY`
-        2. Complete login on Goodwill website
-        3. Copy the `request_token` from redirect URL
-        4. Use with your API Key and API Secret
-        
-        ### 📊 Your API Details
-        - **API Key:** `9c155c1fff651d01513b455396af2449`
-        - **User ID:** `GWC100643`
-        - **Endpoint:** `https://api.gwcindia.in/v1/`
-        
-        ### 🔗 Quick Login Link
-        [🔗 Login to get Request Token](https://api.gwcindia.in/v1/login?api_key=9c155c1fff651d01513b455396af2449)
-        
-        ### 📖 Documentation
-        - Full API docs: [developer.gwcindia.in/api](https://developer.gwcindia.in/api/)
-        - gwcmodel PyPI: [pypi.org/project/gwcmodel](https://pypi.org/project/gwcmodel/)
-        """)
 
 # Initialize session state
 if 'bot' not in st.session_state:
@@ -1786,150 +1964,239 @@ if 'gw_logged_in' not in st.session_state:
 
 bot = st.session_state.bot
 
-# Main title and disclaimer
-st.title("⚡ FlyingBuddha Scalping Bot - Complete Production System")
-show_production_disclaimer()
+# ==================== MAIN APPLICATION UI ====================
 
-# Show gwcmodel status and API instructions
-show_gwcmodel_status()
-show_api_instructions()
+# Title and disclaimer
+st.title("⚡ FlyingBuddha Scalping Bot - COMPLETE FIXED VERSION")
+show_enhanced_disclaimer()
+
+# Show diagnostics
+show_gwcmodel_diagnostics()
 
 # ==================== SIDEBAR CONTROLS ====================
 
-st.sidebar.header("🚀 8-Strategy Scalping Bot")
+st.sidebar.header("🚀 Enhanced 8-Strategy Bot")
 
-# Current status display
+# Enhanced status display
 connection_status = "🟢 Connected" if bot.api.is_connected else "🔴 Disconnected"
 connection_method = f" ({bot.api.connection_method})" if bot.api.connection_method else ""
 
 st.sidebar.markdown(f"""
-**📊 Status Dashboard:**
+**📊 Enhanced Status:**
 - **API Status:** {connection_status}{connection_method}
 - **Trading Mode:** {'🔴 LIVE' if bot.mode == 'LIVE' else '🟠 PAPER'}
 - **Capital:** ₹{bot.capital:,.2f}
 - **Daily P&L:** ₹{bot.daily_pnl:,.2f}
 - **Positions:** {len(bot.positions)}/{bot.max_positions}
 - **Bot Status:** {'🟢 Running' if bot.is_running else '🔴 Stopped'}
+- **Drawdown:** ₹{bot.current_drawdown:,.2f}
 """)
 
-# Strategy Performance Summary
-if any(stats['trades'] > 0 for stats in bot.strategies.strategy_stats.values()):
-    st.sidebar.markdown("**🎯 Strategy Performance:**")
-    for strategy_id, stats in bot.strategies.strategy_stats.items():
-        if stats['trades'] > 0:
-            strategy_name = bot.strategies.strategies[strategy_id]['name']
-            color = bot.strategies.strategies[strategy_id]['color']
-            
-            st.sidebar.markdown(f"""
-            <div style="background-color: {color}20; padding: 5px; border-radius: 3px; margin: 2px 0; font-size: 12px;">
-                <strong>{strategy_name}</strong><br>
-                {stats['trades']} trades | {stats['success_rate']:.1f}% | ₹{stats['total_pnl']:.0f}
-            </div>
-            """, unsafe_allow_html=True)
+# ==================== ENHANCED AUTHENTICATION ====================
 
-# ==================== AUTHENTICATION SECTION ====================
+st.subheader("🔐 Enhanced Goodwill Authentication")
 
-st.sidebar.subheader("🔐 Goodwill Authentication")
+# Comprehensive setup instructions
+with st.expander("📋 Complete Setup Guide - FIXED VERSION", expanded=not st.session_state.gw_logged_in):
+    st.markdown("""
+    ### 🎯 FIXED Authentication Flow
+    
+    **✅ Method 1: Request Token Flow (Primary - Most Reliable)**
+    1. Enter your API Key and API Secret below
+    2. Click "🔗 Generate Login URL"
+    3. **Open the URL in NEW TAB** and login with your Goodwill credentials
+    4. After successful login, **copy the ENTIRE redirect URL** from browser
+    5. Paste the complete URL in "Redirect URL" field
+    6. Click "🎫 Login with Request Token"
+    
+    **✅ Method 2: gwcmodel (Secondary - If Available)**
+    - System automatically detects available gwcmodel classes
+    - Uses your trading account credentials
+    - Multiple initialization methods attempted
+    
+    ### 📊 Your API Details
+    - **API Key:** `9c155c1fff651d01513b455396af2449` 
+    - **User ID:** `GWC100643`
+    - **API Docs:** [developer.gwcindia.in/api](https://developer.gwcindia.in/api/)
+    
+    ### 🔧 What's Fixed:
+    - ✅ Enhanced gwcmodel class detection
+    - ✅ Proper SHA-256 signature generation  
+    - ✅ Automatic request_token parsing
+    - ✅ Multiple fallback authentication methods
+    - ✅ Comprehensive error handling with solutions
+    """)
 
 if not st.session_state.gw_logged_in:
-    # Login method tabs
-    auth_method = st.sidebar.radio(
-        "Authentication Method:",
-        ["gwcmodel Credentials", "Request Token"],
-        help="gwcmodel is the recommended method"
-    )
+    # Enhanced Request Token Method
+    st.markdown("### 🎫 Method 1: Request Token Authentication")
     
-    if auth_method == "gwcmodel Credentials":
-        with st.sidebar.form("gwc_credentials"):
-            st.markdown("**📝 gwcmodel Login (Recommended)**")
-            
-            api_key = st.text_input("API Key", value="9c155c1fff651d01513b455396af2449", type="password")
-            user_id = st.text_input("User ID", value="GWC100643")
-            password = st.text_input("Password", type="password")
-            totp_code = st.text_input("TOTP Code (if 2FA enabled)", help="Leave empty if no 2FA")
-            
-            login_submit = st.form_submit_button("🔑 Login via gwcmodel")
-            
-            if login_submit:
-                if api_key and user_id and password:
-                    with st.spinner("🔄 Authenticating via gwcmodel..."):
-                        success = bot.api.login_with_credentials(api_key, user_id, password, totp_code if totp_code else None)
-                        if success:
-                            st.session_state.gw_logged_in = True
-                            st.rerun()
-                else:
-                    st.error("❌ Please fill in required fields")
+    auth_col1, auth_col2 = st.columns(2)
     
-    else:  # Request Token method
-        with st.sidebar.form("gwc_token"):
-            st.markdown("**🎫 Request Token Login**")
-            
-            api_key = st.text_input("API Key", value="9c155c1fff651d01513b455396af2449", type="password")
-            request_token = st.text_input("Request Token", placeholder="From redirect URL")
-            api_secret = st.text_input("API Secret", type="password")
-            
-            if api_key:
-                login_url = f"https://api.gwcindia.in/v1/login?api_key={api_key}"
-                st.markdown(f"[🔗 Get Request Token]({login_url})")
-            
-            token_submit = st.form_submit_button("🎫 Login with Token")
-            
-            if token_submit:
-                if api_key and request_token and api_secret:
-                    with st.spinner("🔄 Authenticating with request token..."):
+    with auth_col1:
+        api_key = st.text_input("API Key", value="9c155c1fff651d01513b455396af2449", type="password")
+        api_secret = st.text_input("API Secret", type="password", 
+                                  help="Required for SHA-256 signature generation")
+        
+        if api_key and st.button("🔗 Generate Login URL", use_container_width=True):
+            login_url = bot.api.generate_login_url(api_key)
+            st.success("✅ Login URL Generated!")
+            st.markdown(f"**[🔗 Click Here to Login to Goodwill]({login_url})**", unsafe_allow_html=True)
+            st.code(login_url, language="text")
+            st.info("👆 **IMPORTANT:** Open this URL in a NEW TAB, login, then copy the redirect URL below")
+    
+    with auth_col2:
+        redirect_url = st.text_area(
+            "Complete Redirect URL (after login)", 
+            height=120,
+            placeholder="After login, paste the COMPLETE URL from your browser here:\nExample: https://your-redirect-url.com?request_token=abc123xyz...",
+            help="Copy the entire URL from browser address bar after successful Goodwill login"
+        )
+        
+        if st.button("🎫 Login with Request Token", type="primary", use_container_width=True):
+            if redirect_url and api_secret:
+                request_token = bot.api.parse_request_token_from_url(redirect_url)
+                
+                if request_token:
+                    st.info(f"🔍 Found Request Token: {request_token[:15]}...{request_token[-5:]}")
+                    
+                    with st.spinner("🔄 Authenticating with Goodwill API..."):
                         success = bot.api.login_with_request_token(api_key, request_token, api_secret)
                         if success:
                             st.session_state.gw_logged_in = True
                             st.rerun()
                 else:
-                    st.error("❌ Please fill in all fields")
+                    st.error("❌ Could not find request_token in URL. Please check the URL format.")
+                    st.info("💡 Make sure you copied the COMPLETE URL after successful login")
+            else:
+                st.error("❌ Please provide both Redirect URL and API Secret")
+    
+    # Enhanced gwcmodel Method
+    st.markdown("---")
+    st.markdown("### 🔑 Method 2: gwcmodel Authentication")
+    
+    if GWCMODEL_AVAILABLE and GWC_CLASS:
+        st.success(f"✅ gwcmodel.{GWC_CLASS_NAME} detected")
+        
+        gwc_col1, gwc_col2 = st.columns(2)
+        
+        with gwc_col1:
+            gwc_api_key = st.text_input("gwcmodel API Key", value="9c155c1fff651d01513b455396af2449", type="password")
+            gwc_user_id = st.text_input("User ID", value="GWC100643")
+        
+        with gwc_col2:
+            gwc_password = st.text_input("Password", type="password")
+            gwc_totp = st.text_input("TOTP/2FA Code", help="Leave empty if 2FA not enabled")
+        
+        if st.button("🔑 Login via gwcmodel", use_container_width=True):
+            if gwc_api_key and gwc_user_id and gwc_password:
+                bot.api.api_secret = api_secret if api_secret else ""
+                with st.spinner("🔄 Trying gwcmodel authentication methods..."):
+                    success = bot.api.try_gwcmodel_login(gwc_api_key, gwc_user_id, gwc_password, gwc_totp)
+                    if success:
+                        st.session_state.gw_logged_in = True
+                        st.rerun()
+            else:
+                st.error("❌ Please fill in API Key, User ID, and Password")
+    else:
+        st.warning("⚠️ gwcmodel not available or no valid class found. Use Request Token method above.")
+        if gwcmodel_attributes:
+            st.code(f"Available attributes: {', '.join(gwcmodel_attributes[:5])}")
 
 else:
-    # Already logged in
-    st.sidebar.success(f"✅ Connected via {bot.api.connection_method}")
-    st.sidebar.markdown(f"**Client ID:** {bot.api.client_id}")
+    # Successfully connected - show enhanced connection info
+    st.success(f"✅ Successfully Connected via {bot.api.connection_method}")
     
-    # Connection actions
-    conn_col1, conn_col2 = st.sidebar.columns(2)
+    # Enhanced connection details
+    conn_col1, conn_col2, conn_col3, conn_col4 = st.columns(4)
     
     with conn_col1:
-        if st.button("👤 Profile"):
-            profile = bot.api.get_profile()
-            if profile:
-                st.sidebar.json(profile)
-            else:
-                st.sidebar.warning("Could not fetch profile")
+        st.metric("Client ID", bot.api.client_id or "Unknown")
     
     with conn_col2:
-        if st.button("📊 Positions"):
+        connection_time = bot.api.last_login_time.strftime("%H:%M:%S") if bot.api.last_login_time else "Unknown"
+        st.metric("Connected At", connection_time)
+    
+    with conn_col3:
+        session_duration = ""
+        if bot.api.last_login_time:
+            duration = datetime.now() - bot.api.last_login_time
+            session_duration = f"{int(duration.total_seconds() / 60)}m"
+        st.metric("Session Duration", session_duration)
+    
+    with conn_col4:
+        if st.button("🔄 Test Connection"):
+            test_result, message = bot.api.test_connection()
+            if test_result:
+                st.success(f"✅ {message}")
+            else:
+                st.error(f"❌ {message}")
+    
+    # Enhanced connection actions
+    action_col1, action_col2, action_col3, action_col4 = st.columns(4)
+    
+    with action_col1:
+        if st.button("👤 Profile", use_container_width=True):
+            profile = bot.api.get_profile()
+            if profile:
+                st.json(profile)
+            else:
+                st.warning("Could not fetch profile")
+    
+    with action_col2:
+        if st.button("📊 Positions", use_container_width=True):
             positions = bot.api.get_positions()
             if positions:
-                st.sidebar.json(positions[:2])  # Show first 2
+                st.json(positions[:3])  # Show first 3
             else:
-                st.sidebar.info("No positions")
+                st.info("No positions found")
     
-    # Logout button
-    if st.sidebar.button("🚪 Logout", type="secondary"):
-        bot.api.logout()
-        st.session_state.gw_logged_in = False
-        st.success("✅ Logged out successfully")
-        st.rerun()
+    with action_col3:
+        if st.button("💰 Balance", use_container_width=True):
+            # Try to get balance via API
+            try:
+                headers = bot.api.get_headers()
+                if headers:
+                    response = requests.get(f"{bot.api.base_url}/balance", headers=headers, timeout=10)
+                    if response.status_code == 200:
+                        data = response.json()
+                        if data.get('status') == 'success':
+                            st.json(data.get('data', {}))
+                        else:
+                            st.warning("Balance API not available")
+                    else:
+                        st.warning("Balance API call failed")
+                else:
+                    st.warning("No authentication headers")
+            except Exception as e:
+                st.warning(f"Balance fetch error: {e}")
+    
+    with action_col4:
+        if st.button("🚪 Logout", type="secondary", use_container_width=True):
+            if bot.api.logout():
+                st.session_state.gw_logged_in = False
+                st.success("✅ Logged out successfully")
+                st.rerun()
+            else:
+                st.warning("Logout completed with warnings")
+                st.session_state.gw_logged_in = False
+                st.rerun()
 
-# ==================== TRADING MODE & PARAMETERS ====================
+# ==================== ENHANCED TRADING CONTROLS ====================
 
-st.sidebar.subheader("🎮 Trading Controls")
+st.subheader("🎮 Enhanced Trading Controls")
 
-# Mode selection
-mode_col1, mode_col2 = st.sidebar.columns(2)
+# Mode and bot control
+control_col1, control_col2, control_col3, control_col4 = st.columns(4)
 
-with mode_col1:
-    if st.button("🟠 Paper", disabled=(bot.mode == "PAPER"), use_container_width=True):
+with control_col1:
+    if st.button("🟠 Paper Mode", disabled=(bot.mode == "PAPER"), use_container_width=True):
         bot.mode = "PAPER"
         st.success("✅ Switched to Paper Mode")
         st.rerun()
 
-with mode_col2:
-    if st.button("🔴 Live", disabled=(bot.mode == "LIVE"), use_container_width=True):
+with control_col2:
+    if st.button("🔴 Live Mode", disabled=(bot.mode == "LIVE"), use_container_width=True):
         if not bot.api.is_connected:
             st.error("❌ Connect to Goodwill API first")
         else:
@@ -1937,184 +2204,181 @@ with mode_col2:
             st.warning("⚠️ Live Mode - Real orders will be placed!")
             st.rerun()
 
-# Trading parameters
-st.sidebar.subheader("⚙️ Parameters")
-
-bot.risk_per_trade = st.sidebar.slider("Risk per Trade (%)", 5, 25, 15, 1) / 100
-bot.max_positions = st.sidebar.slider("Max Positions", 1, 6, 4, 1)
-bot.max_hold_time = st.sidebar.slider("Max Hold Time (sec)", 60, 300, 180, 30)
-bot.risk_reward_ratio = st.sidebar.slider("Risk:Reward", 1.5, 3.0, 2.0, 0.1)
-
-# Capital management
-new_capital = st.sidebar.number_input("Capital (₹)", 10000, 10000000, int(bot.capital), 10000)
-if new_capital != bot.capital:
-    bot.capital = float(new_capital)
-    bot.peak_capital = max(bot.peak_capital, bot.capital)
-
-# Symbol selection
-st.sidebar.subheader("📊 Symbols")
-selected_symbols = st.sidebar.multiselect(
-    "Trading Symbols:",
-    options=["HDFCBANK", "ICICIBANK", "SBIN", "KOTAKBANK", "AXISBANK", 
-             "BAJFINANCE", "RELIANCE", "INFY", "TCS", "ADANIPORTS",
-             "WIPRO", "LT", "TITAN", "MARUTI", "BHARTIARTL"],
-    default=bot.symbols
-)
-
-if selected_symbols:
-    bot.symbols = selected_symbols
-
-# ==================== BOT CONTROLS ====================
-
-st.sidebar.subheader("🎮 Bot Controls")
-
-# Main start/stop button
-if not bot.is_running:
-    if st.sidebar.button("🚀 START BOT", type="primary", use_container_width=True):
-        if bot.mode == "LIVE" and not bot.api.is_connected:
-            st.sidebar.error("❌ Connect to Goodwill API for Live Mode")
-        else:
-            bot.is_running = True
-            st.sidebar.success("✅ Bot Started!")
+with control_col3:
+    if not bot.is_running:
+        if st.button("🚀 START BOT", type="primary", use_container_width=True):
+            if bot.mode == "LIVE" and not bot.api.is_connected:
+                st.error("❌ Connect to Goodwill API for Live Mode")
+            else:
+                bot.is_running = True
+                st.success("✅ Bot Started!")
+                st.rerun()
+    else:
+        if st.button("⏹️ STOP BOT", type="secondary", use_container_width=True):
+            bot.is_running = False
+            st.warning("⏸️ Bot Stopped!")
             st.rerun()
-else:
-    if st.sidebar.button("⏹️ STOP BOT", type="secondary", use_container_width=True):
-        bot.is_running = False
-        st.sidebar.warning("⏸️ Bot Stopped!")
-        st.rerun()
 
-# Additional controls
-control_col1, control_col2 = st.sidebar.columns(2)
-
-with control_col1:
-    if st.button("🔄 Single Cycle"):
+with control_col4:
+    if st.button("🔄 Manual Cycle", use_container_width=True):
         with st.spinner("Running trading cycle..."):
             bot.run_trading_cycle()
             st.rerun()
 
-with control_col2:
-    if st.button("📊 Refresh"):
-        st.rerun()
+# Enhanced trading parameters
+st.subheader("⚙️ Enhanced Trading Parameters")
 
-# Emergency stop
-if bot.positions:
-    if st.sidebar.button("🛑 EMERGENCY STOP", type="secondary", use_container_width=True):
-        for pos_id in list(bot.positions.keys()):
-            position = bot.positions[pos_id]
-            try:
-                if bot.api.is_connected:
-                    live_data = bot.api.get_quote(position['symbol'])
-                    exit_price = live_data['price'] if live_data and live_data['price'] > 0 else position['entry_price']
-                else:
-                    ticker = yf.Ticker(f"{position['symbol']}.NS")
-                    hist = ticker.history(period="1d", interval="1m")
-                    exit_price = float(hist.iloc[-1]['Close']) if len(hist) > 0 else position['entry_price']
-            except:
-                exit_price = position['entry_price']
-            
-            bot.close_position(pos_id, exit_price, "EMERGENCY_STOP")
-        
-        st.sidebar.warning("🛑 All positions closed!")
-        st.rerun()
+param_col1, param_col2, param_col3, param_col4 = st.columns(4)
 
-# ==================== AUTO-REFRESH LOGIC ====================
+with param_col1:
+    new_risk = st.slider("Risk per Trade (%)", 5, 25, int(bot.risk_per_trade * 100), 1)
+    bot.risk_per_trade = new_risk / 100
 
-# Auto-refresh when bot is running
-if bot.is_running:
-    bot.run_trading_cycle()
-    time.sleep(3)  # 3-second cycle for production
-    st.rerun()
+with param_col2:
+    bot.max_positions = st.slider("Max Positions", 1, 6, bot.max_positions, 1)
 
-# ==================== MAIN DASHBOARD ====================
+with param_col3:
+    bot.max_hold_time = st.slider("Max Hold Time (sec)", 60, 300, bot.max_hold_time, 30)
 
-# Status overview
-col1, col2, col3, col4, col5, col6 = st.columns(6)
+with param_col4:
+    bot.risk_reward_ratio = st.slider("Risk:Reward", 1.5, 3.0, bot.risk_reward_ratio, 0.1)
 
-with col1:
-    status_color = "🟢" if bot.is_running else "🔴"
-    st.metric("Bot Status", f"{status_color} {'Running' if bot.is_running else 'Stopped'}")
+# Capital management and symbol selection
+st.subheader("💰 Capital & Symbol Management")
 
-with col2:
-    connection_status = "🟢 Connected" if bot.api.is_connected else "🔴 Offline"
-    st.metric("API Status", connection_status)
+capital_col1, capital_col2 = st.columns(2)
 
-with col3:
+with capital_col1:
+    new_capital = st.number_input("Capital (₹)", 10000, 10000000, int(bot.capital), 10000)
+    if new_capital != bot.capital:
+        bot.capital = float(new_capital)
+        bot.peak_capital = max(bot.peak_capital, bot.capital)
+
+with capital_col2:
+    all_symbols = [
+        "HDFCBANK", "ICICIBANK", "SBIN", "KOTAKBANK", "AXISBANK", 
+        "BAJFINANCE", "RELIANCE", "INFY", "TCS", "ADANIPORTS",
+        "WIPRO", "LT", "TITAN", "MARUTI", "BHARTIARTL", "HINDUNILVR",
+        "ASIANPAINT", "NESTLEIND", "POWERGRID", "NTPC"
+    ]
+    
+    selected_symbols = st.multiselect(
+        "Trading Symbols:",
+        options=all_symbols,
+        default=bot.symbols,
+        help="Select symbols for trading (max 15 recommended)"
+    )
+    
+    if selected_symbols:
+        bot.symbols = selected_symbols[:15]  # Limit to 15 for performance
+
+# ==================== ENHANCED STATUS DASHBOARD ====================
+
+st.subheader("📊 Enhanced Status Dashboard")
+
+# Main metrics
+main_col1, main_col2, main_col3, main_col4, main_col5, main_col6 = st.columns(6)
+
+with main_col1:
+    bot_status = f"{'🟢 Running' if bot.is_running else '🔴 Stopped'}"
+    st.metric("Bot Status", bot_status)
+
+with main_col2:
+    api_status = f"{'🟢 Connected' if bot.api.is_connected else '🔴 Offline'}"
+    st.metric("API Status", api_status)
+
+with main_col3:
     mode_display = f"{'🔴 LIVE' if bot.mode == 'LIVE' else '🟠 PAPER'}"
     st.metric("Trading Mode", mode_display)
 
-with col4:
-    st.metric("Active Positions", f"{len(bot.positions)}/{bot.max_positions}")
+with main_col4:
+    st.metric("Positions", f"{len(bot.positions)}/{bot.max_positions}")
 
-with col5:
-    pnl_delta = f"₹{bot.pnl:.2f}" if bot.pnl != 0 else None
-    st.metric("Total P&L", f"₹{bot.pnl:.2f}", delta=pnl_delta)
+with main_col5:
+    pnl_color = "🟢" if bot.pnl >= 0 else "🔴"
+    st.metric("Total P&L", f"₹{bot.pnl:.2f}", delta=f"{pnl_color}")
 
-with col6:
-    daily_delta = f"₹{bot.daily_pnl:.2f}" if bot.daily_pnl != 0 else None
-    st.metric("Daily P&L", f"₹{bot.daily_pnl:.2f}", delta=daily_delta)
+with main_col6:
+    daily_color = "🟢" if bot.daily_pnl >= 0 else "🔴"
+    st.metric("Daily P&L", f"₹{bot.daily_pnl:.2f}", delta=f"{daily_color}")
 
-# ==================== RISK MONITORING ====================
+# ==================== ENHANCED RISK MONITORING ====================
 
-st.subheader("🛡️ Risk Monitoring")
+st.subheader("🛡️ Enhanced Risk Monitoring")
 
 risk_col1, risk_col2, risk_col3, risk_col4 = st.columns(4)
 
 with risk_col1:
     drawdown_pct = (bot.current_drawdown / bot.peak_capital) * 100 if bot.peak_capital > 0 else 0
-    st.metric("Current Drawdown", f"₹{bot.current_drawdown:.2f}", delta=f"{drawdown_pct:.1f}%")
+    drawdown_color = "🟢" if drawdown_pct < 5 else "🟡" if drawdown_pct < 8 else "🔴"
+    st.metric("Drawdown", f"₹{bot.current_drawdown:.2f}", delta=f"{drawdown_color} {drawdown_pct:.1f}%")
 
 with risk_col2:
     daily_loss_pct = (abs(bot.daily_pnl) / bot.capital) * 100 if bot.daily_pnl < 0 else 0
-    st.metric("Daily Loss %", f"{daily_loss_pct:.1f}%", delta="Limit: 5.0%")
+    loss_color = "🟢" if daily_loss_pct < 2 else "🟡" if daily_loss_pct < 4 else "🔴"
+    st.metric("Daily Loss %", f"{loss_color} {daily_loss_pct:.1f}%", delta="Limit: 5.0%")
 
 with risk_col3:
     position_risk = len(bot.positions) * bot.risk_per_trade * 100
-    st.metric("Position Risk", f"{position_risk:.1f}%", delta=f"Max: {bot.max_positions * bot.risk_per_trade * 100:.1f}%")
+    risk_color = "🟢" if position_risk < 40 else "🟡" if position_risk < 60 else "🔴"
+    st.metric("Position Risk", f"{risk_color} {position_risk:.1f}%")
 
 with risk_col4:
     capital_utilization = (sum([p['quantity'] * p['entry_price'] for p in bot.positions.values()]) / bot.capital) * 100 if bot.positions else 0
-    st.metric("Capital Used", f"{capital_utilization:.1f}%")
+    util_color = "🟢" if capital_utilization < 50 else "🟡" if capital_utilization < 75 else "🔴"
+    st.metric("Capital Used", f"{util_color} {capital_utilization:.1f}%")
 
 # Risk warnings
 if drawdown_pct > 8:
-    st.warning("⚠️ Approaching maximum drawdown limit (10%)")
+    st.error("⚠️ **RISK ALERT:** Approaching maximum drawdown limit (10%)")
 if daily_loss_pct > 4:
-    st.warning("⚠️ Approaching daily loss limit (5%)")
+    st.error("⚠️ **RISK ALERT:** Approaching daily loss limit (5%)")
+if position_risk > 60:
+    st.warning("⚠️ **WARNING:** High position risk exposure")
 
-# ==================== PERFORMANCE METRICS ====================
+# ==================== ENHANCED PERFORMANCE METRICS ====================
 
-st.subheader("📈 Performance Metrics")
+st.subheader("📈 Enhanced Performance Analytics")
 
 metrics = bot.get_performance_metrics()
 
-perf_col1, perf_col2, perf_col3, perf_col4 = st.columns(4)
+if metrics['total_trades'] > 0:
+    # Main performance metrics
+    perf_col1, perf_col2, perf_col3, perf_col4, perf_col5 = st.columns(5)
+    
+    with perf_col1:
+        st.metric("Total Trades", metrics['total_trades'])
+        st.metric("Win Rate", f"{metrics['win_rate']:.1f}%")
+    
+    with perf_col2:
+        st.metric("Total P&L", f"₹{metrics['total_pnl']:.2f}")
+        st.metric("Avg Trade", f"₹{metrics['avg_trade']:.2f}")
+    
+    with perf_col3:
+        st.metric("Avg Win", f"₹{metrics['avg_win']:.2f}")
+        st.metric("Avg Loss", f"₹{metrics['avg_loss']:.2f}")
+    
+    with perf_col4:
+        st.metric("Largest Win", f"₹{metrics['largest_win']:.2f}")
+        st.metric("Largest Loss", f"₹{metrics['largest_loss']:.2f}")
+    
+    with perf_col5:
+        st.metric("Profit Factor", f"{metrics['profit_factor']:.2f}")
+        st.metric("Sharpe Ratio", f"{metrics['sharpe_ratio']:.3f}")
 
-with perf_col1:
-    st.metric("Total Trades", metrics['total_trades'])
-    st.metric("Win Rate", f"{metrics['win_rate']:.1f}%")
+else:
+    st.info("📊 No performance data yet. Start trading to see comprehensive analytics.")
 
-with perf_col2:
-    st.metric("Total P&L", f"₹{metrics['total_pnl']:.2f}")
-    st.metric("Avg Trade", f"₹{metrics['avg_trade']:.2f}")
+# ==================== ENHANCED 8-STRATEGY DASHBOARD ====================
 
-with perf_col3:
-    st.metric("Sharpe Ratio", f"{metrics['sharpe_ratio']:.3f}")
-    st.metric("Profit Factor", f"{metrics['profit_factor']:.2f}")
-
-with perf_col4:
-    st.metric("Best Strategy", metrics['best_strategy'])
-    st.metric("Avg Hold Time", f"{metrics['avg_hold_time']:.1f}s")
-
-# ==================== 8-STRATEGY PERFORMANCE DASHBOARD ====================
-
-st.subheader("🎯 8-Strategy Performance Dashboard")
+st.subheader("🎯 Enhanced 8-Strategy Performance Dashboard")
 
 if any(stats['trades'] > 0 for stats in bot.strategies.strategy_stats.values()):
-    strategy_perf_data = []
+    strategy_data = []
     for strategy_id, stats in bot.strategies.strategy_stats.items():
         if stats['trades'] > 0:
             strategy_info = bot.strategies.strategies[strategy_id]
-            strategy_perf_data.append({
+            strategy_data.append({
                 'ID': strategy_id,
                 'Strategy': strategy_info['name'],
                 'Description': strategy_info['desc'],
@@ -2123,132 +2387,113 @@ if any(stats['trades'] > 0 for stats in bot.strategies.strategy_stats.values()):
                 'Total P&L': f"₹{stats['total_pnl']:.2f}",
                 'Avg Profit': f"₹{stats['avg_profit']:.2f}",
                 'Avg Loss': f"₹{stats['avg_loss']:.2f}",
-                'Avg Hold Time': f"{stats['avg_hold_time']:.1f}s",
-                'Last Used': stats['last_used'].strftime("%H:%M:%S") if stats['last_used'] else "Never"
+                'Avg Hold': f"{stats['avg_hold_time']:.1f}s",
+                'Last Used': stats['last_used'].strftime("%H:%M") if stats['last_used'] else "Never"
             })
     
-    if strategy_perf_data:
-        df_strategy_perf = pd.DataFrame(strategy_perf_data)
+    if strategy_data:
+        df_strategies = pd.DataFrame(strategy_data)
         
-        # Color-code the dataframe
-        def color_pnl(val):
-            if 'P&L' in str(val) or '₹' in str(val):
+        # Enhanced styling
+        def style_performance(val):
+            if '₹' in str(val):
                 try:
                     num_val = float(str(val).replace('₹', '').replace(',', ''))
-                    return 'color: green' if num_val >= 0 else 'color: red'
+                    return 'background-color: #c8e6c9' if num_val >= 0 else 'background-color: #ffcdd2'
+                except:
+                    return ''
+            elif '%' in str(val):
+                try:
+                    num_val = float(str(val).replace('%', ''))
+                    return 'background-color: #c8e6c9' if num_val >= 50 else 'background-color: #fff3e0'
                 except:
                     return ''
             return ''
         
-        styled_df = df_strategy_perf.style.applymap(color_pnl, subset=['Total P&L', 'Avg Profit', 'Avg Loss'])
-        st.dataframe(styled_df, use_container_width=True)
+        styled_strategies = df_strategies.style.applymap(style_performance, 
+                                                        subset=['Win Rate', 'Total P&L', 'Avg Profit', 'Avg Loss'])
+        st.dataframe(styled_strategies, use_container_width=True)
         
-        # Strategy performance charts
-        st.subheader("📊 Strategy Analytics")
-        
-        chart_col1, chart_col2 = st.columns(2)
-        
-        with chart_col1:
-            # Strategy P&L chart
-            fig_pnl = go.Figure()
+        # Enhanced strategy analytics
+        if len(strategy_data) > 2:
+            st.subheader("📊 Strategy Performance Charts")
             
-            strategy_names = [data['Strategy'] for data in strategy_perf_data]
-            strategy_pnls = [float(data['Total P&L'].replace('₹', '')) for data in strategy_perf_data]
-            colors = [bot.strategies.strategies[data['ID']]['color'] for data in strategy_perf_data]
+            chart_col1, chart_col2 = st.columns(2)
             
-            fig_pnl.add_trace(go.Bar(
-                x=strategy_names,
-                y=strategy_pnls,
-                marker_color=colors,
-                text=[f"₹{p:.0f}" for p in strategy_pnls],
-                textposition='auto',
-                name="Strategy P&L"
-            ))
+            with chart_col1:
+                # Strategy P&L comparison
+                fig_pnl = go.Figure()
+                
+                strategy_names = [d['Strategy'] for d in strategy_data]
+                strategy_pnls = [float(d['Total P&L'].replace('₹', '')) for d in strategy_data]
+                colors = [bot.strategies.strategies[d['ID']]['color'] for d in strategy_data]
+                
+                fig_pnl.add_trace(go.Bar(
+                    x=strategy_names,
+                    y=strategy_pnls,
+                    marker_color=colors,
+                    text=[f"₹{p:.0f}" for p in strategy_pnls],
+                    textposition='auto'
+                ))
+                
+                fig_pnl.update_layout(
+                    title="Strategy P&L Performance",
+                    xaxis_title="Strategy",
+                    yaxis_title="P&L (₹)",
+                    height=400,
+                    xaxis={'tickangle': -45}
+                )
+                st.plotly_chart(fig_pnl, use_container_width=True)
             
-            fig_pnl.update_layout(
-                title="Strategy P&L Performance",
-                xaxis_title="Strategy",
-                yaxis_title="P&L (₹)",
-                height=400,
-                xaxis={'tickangle': -45}
-            )
-            st.plotly_chart(fig_pnl, use_container_width=True)
-        
-        with chart_col2:
-            # Strategy win rate chart
-            fig_win_rate = go.Figure()
-            
-            win_rates = [float(data['Win Rate'].replace('%', '')) for data in strategy_perf_data]
-            
-            fig_win_rate.add_trace(go.Bar(
-                x=strategy_names,
-                y=win_rates,
-                marker_color=colors,
-                text=[f"{w:.1f}%" for w in win_rates],
-                textposition='auto',
-                name="Win Rate"
-            ))
-            
-            fig_win_rate.update_layout(
-                title="Strategy Win Rates",
-                xaxis_title="Strategy",
-                yaxis_title="Win Rate (%)",
-                height=400,
-                xaxis={'tickangle': -45}
-            )
-            st.plotly_chart(fig_win_rate, use_container_width=True)
-        
-        # Strategy usage heatmap
-        if len(strategy_perf_data) > 3:
-            st.subheader("🔥 Strategy Usage Heatmap")
-            
-            # Create usage matrix
-            strategy_trades = [data['Trades'] for data in strategy_perf_data]
-            max_trades = max(strategy_trades) if strategy_trades else 1
-            
-            fig_heatmap = go.Figure(data=go.Heatmap(
-                z=[strategy_trades],
-                x=strategy_names,
-                y=['Usage'],
-                colorscale='RdYlGn',
-                text=[[f"{t} trades" for t in strategy_trades]],
-                texttemplate="%{text}",
-                textfont={"size": 10},
-                colorbar=dict(title="Trades")
-            ))
-            
-            fig_heatmap.update_layout(
-                title="Strategy Usage Frequency",
-                height=200
-            )
-            st.plotly_chart(fig_heatmap, use_container_width=True)
+            with chart_col2:
+                # Strategy win rate comparison
+                fig_winrate = go.Figure()
+                
+                win_rates = [float(d['Win Rate'].replace('%', '')) for d in strategy_data]
+                
+                fig_winrate.add_trace(go.Bar(
+                    x=strategy_names,
+                    y=win_rates,
+                    marker_color=colors,
+                    text=[f"{w:.1f}%" for w in win_rates],
+                    textposition='auto'
+                ))
+                
+                fig_winrate.update_layout(
+                    title="Strategy Win Rates",
+                    xaxis_title="Strategy",
+                    yaxis_title="Win Rate (%)",
+                    height=400,
+                    xaxis={'tickangle': -45}
+                )
+                st.plotly_chart(fig_winrate, use_container_width=True)
 
 else:
-    st.info("📊 No strategy performance data yet. Run the bot to see detailed analytics.")
+    st.info("🎯 No strategy performance data yet. Run the bot to see detailed analytics.")
     
-    # Show strategy descriptions
-    st.subheader("🎯 Available Strategies")
+    # Show available strategies
+    st.subheader("🎯 Available Trading Strategies")
     
-    strategy_desc_data = []
+    strategy_info_data = []
     for strategy_id, strategy_info in bot.strategies.strategies.items():
-        strategy_desc_data.append({
+        strategy_info_data.append({
             'ID': strategy_id,
-            'Strategy': strategy_info['name'],
+            'Strategy Name': strategy_info['name'],
             'Description': strategy_info['desc']
         })
     
-    df_strategies = pd.DataFrame(strategy_desc_data)
-    st.dataframe(df_strategies, use_container_width=True)
+    df_strategy_info = pd.DataFrame(strategy_info_data)
+    st.dataframe(df_strategy_info, use_container_width=True)
 
-# ==================== ACTIVE POSITIONS ====================
+# ==================== ENHANCED ACTIVE POSITIONS ====================
 
-st.subheader("🎯 Active Positions")
+st.subheader("🎯 Enhanced Active Positions")
 
 if bot.positions:
     positions_data = []
     
     for pos_id, position in bot.positions.items():
-        # Get current price
+        # Get current price for P&L calculation
         current_price = position['entry_price']
         try:
             if bot.api.is_connected:
@@ -2274,7 +2519,7 @@ if bot.positions:
         positions_data.append({
             'Symbol': position['symbol'],
             'Strategy': position['strategy_name'],
-            'Action': position['action'],
+            'Action': f"{'🟢 LONG' if position['action'] == 'B' else '🔴 SHORT'}",
             'Qty': position['quantity'],
             'Entry': f"₹{position['entry_price']:.2f}",
             'Current': f"₹{current_price:.2f}",
@@ -2289,155 +2534,154 @@ if bot.positions:
     
     df_positions = pd.DataFrame(positions_data)
     
-    # Color-code P&L
-    def color_position_pnl(val):
+    # Enhanced position styling
+    def style_positions(val):
         if 'P&L' in str(val) or '₹' in str(val):
             try:
-                num_val = float(str(val).replace('₹', '').replace(',', ''))
-                return 'background-color: lightgreen' if num_val >= 0 else 'background-color: lightcoral'
+                if 'P&L' in str(val):
+                    num_val = float(str(val).replace('₹', '').replace(',', ''))
+                    return 'background-color: #c8e6c9; font-weight: bold' if num_val >= 0 else 'background-color: #ffcdd2; font-weight: bold'
             except:
                 return ''
+        elif 'LONG' in str(val):
+            return 'color: green; font-weight: bold'
+        elif 'SHORT' in str(val):
+            return 'color: red; font-weight: bold'
         return ''
     
-    styled_positions = df_positions.style.applymap(color_position_pnl, subset=['P&L'])
+    styled_positions = df_positions.style.applymap(style_positions, subset=['Action', 'P&L'])
     st.dataframe(styled_positions, use_container_width=True)
     
-    # Manual position management
-    st.subheader("🔧 Position Management")
+    # Enhanced position management
+    pos_mgmt_col1, pos_mgmt_col2 = st.columns(2)
     
-    pos_to_close = st.selectbox(
-        "Select Position to Close Manually:",
-        options=[""] + [f"{pos['Symbol']} ({pos['Strategy']}) - {pos['Action']}" for pos in positions_data]
-    )
-    
-    if pos_to_close and st.button("🔒 Close Selected Position"):
-        for pos_data in positions_data:
-            if f"{pos_data['Symbol']} ({pos_data['Strategy']}) - {pos_data['Action']}" == pos_to_close:
-                pos_id = pos_data['Position ID']
+    with pos_mgmt_col1:
+        if st.button("🛑 Emergency Close All", type="secondary", use_container_width=True):
+            for pos_id in list(bot.positions.keys()):
                 position = bot.positions[pos_id]
-                
                 try:
+                    current_price = position['entry_price']
                     if bot.api.is_connected:
                         live_data = bot.api.get_quote(position['symbol'])
-                        exit_price = live_data['price'] if live_data and live_data['price'] > 0 else position['entry_price']
-                    else:
-                        ticker = yf.Ticker(f"{position['symbol']}.NS")
-                        hist = ticker.history(period="1d", interval="1m")
-                        exit_price = float(hist.iloc[-1]['Close']) if len(hist) > 0 else position['entry_price']
-                except:
-                    exit_price = position['entry_price']
-                
-                bot.close_position(pos_id, exit_price, "MANUAL_CLOSE")
-                st.success(f"✅ Manually closed: {position['symbol']} ({position['strategy_name']})")
-                st.rerun()
-                break
+                        if live_data and live_data['price'] > 0:
+                            current_price = live_data['price']
+                    bot.close_position(pos_id, current_price, "EMERGENCY_CLOSE")
+                except Exception as e:
+                    st.error(f"Error closing {position['symbol']}: {e}")
+            
+            st.warning("🛑 All positions closed via emergency!")
+            st.rerun()
+    
+    with pos_mgmt_col2:
+        # Select individual position to close
+        position_options = [f"{pos['Symbol']} ({pos['Strategy']}) - {pos['Action']}" for pos in positions_data]
+        selected_position = st.selectbox("Select Position to Close:", [""] + position_options)
+        
+        if selected_position and st.button("🔒 Close Selected", use_container_width=True):
+            for pos_data in positions_data:
+                display_name = f"{pos_data['Symbol']} ({pos_data['Strategy']}) - {pos_data['Action']}"
+                if display_name == selected_position:
+                    pos_id = pos_data['Position ID']
+                    position = bot.positions[pos_id]
+                    
+                    try:
+                        current_price = position['entry_price']
+                        if bot.api.is_connected:
+                            live_data = bot.api.get_quote(position['symbol'])
+                            if live_data and live_data['price'] > 0:
+                                current_price = live_data['price']
+                        
+                        bot.close_position(pos_id, current_price, "MANUAL_CLOSE")
+                        st.success(f"✅ Closed: {position['symbol']}")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error closing position: {e}")
+                    break
 
 else:
-    st.info("📭 No active positions")
+    st.info("📭 No active positions. Start the bot to begin trading.")
 
-# ==================== MARKET OPPORTUNITIES ====================
+# ==================== ENHANCED MARKET OPPORTUNITIES ====================
 
-st.subheader("🔍 Current Market Opportunities")
+st.subheader("🔍 Enhanced Market Opportunities")
 
-try:
-    opportunities = bot.scan_for_opportunities()
+opp_col1, opp_col2 = st.columns(2)
+
+with opp_col1:
+    if st.button("🔍 Scan for Opportunities", use_container_width=True):
+        with st.spinner("🔄 Scanning market conditions..."):
+            opportunities = bot.scan_for_opportunities()
+            st.session_state['latest_opportunities'] = opportunities
+
+with opp_col2:
+    auto_scan = st.checkbox("🔄 Auto-scan every 30 seconds", value=False)
+
+# Display opportunities
+if 'latest_opportunities' in st.session_state and st.session_state['latest_opportunities']:
+    opportunities = st.session_state['latest_opportunities']
     
-    if opportunities:
-        opp_data = []
-        for opp in opportunities:
-            strategy_color = bot.strategies.strategies[opp['strategy_id']]['color']
-            
-            opp_data.append({
-                'Symbol': opp['symbol'],
-                'Strategy': opp['strategy_name'],
-                'Signal': "🟢 LONG" if opp['signal'] > 0 else "🔴 SHORT",
-                'Confidence': f"{opp['confidence']:.1%}",
-                'Price': f"₹{opp['price']:.2f}",
-                'Stop %': f"{opp['stop_pct']:.2%}",
-                'Reason': opp['reason'],
-                'Volume': f"{opp['volume']:,}",
-                'Data Source': opp['data_source'],
-                'Strategy Score': f"{opp['strategy_scores'][opp['strategy_id']]:.1f}"
-            })
-        
-        df_opportunities = pd.DataFrame(opp_data)
-        st.dataframe(df_opportunities, use_container_width=True)
-        
-        # Show market conditions for top opportunity
+    opp_data = []
+    for opp in opportunities:
+        opp_data.append({
+            'Symbol': opp['symbol'],
+            'Strategy': opp['strategy_name'],
+            'Signal': f"{'🟢 LONG' if opp['signal'] > 0 else '🔴 SHORT'}",
+            'Confidence': f"{opp['confidence']:.1%}",
+            'Price': f"₹{opp['price']:.2f}",
+            'Stop %': f"{opp['stop_pct']:.2%}",
+            'Reason': opp['reason'],
+            'Volume': f"{opp['volume']:,}",
+            'Data Source': opp['data_source']
+        })
+    
+    df_opportunities = pd.DataFrame(opp_data)
+    st.dataframe(df_opportunities, use_container_width=True)
+    
+    # Manual execution option
+    if st.button("🚀 Execute Top Opportunity", type="primary"):
         if opportunities:
-            st.subheader("📊 Market Conditions Analysis (Top Opportunity)")
-            top_opp = opportunities[0]
-            conditions = top_opp['market_conditions']
-            
-            cond_col1, cond_col2, cond_col3 = st.columns(3)
-            
-            with cond_col1:
-                st.markdown("**Trend Analysis:**")
-                st.write(f"Trending: {'✅' if conditions['trending'] else '❌'}")
-                st.write(f"Strength: {conditions['trend_strength']:.2f}%")
-                st.write(f"Direction: {'📈 Bullish' if conditions['trend_direction'] > 0 else '📉 Bearish'}")
-            
-            with cond_col2:
-                st.markdown("**Volume & Volatility:**")
-                st.write(f"Volume Surge: {'✅' if conditions['volume_surge'] else '❌'}")
-                st.write(f"Volume Ratio: {conditions['volume_ratio']:.2f}x")
-                st.write(f"Volatility: {conditions['volatility']:.2f}%")
-            
-            with cond_col3:
-                st.markdown("**Technical Indicators:**")
-                st.write(f"RSI: {conditions['rsi']:.1f}")
-                st.write(f"Near Support: {'✅' if conditions['near_support'] else '❌'}")
-                st.write(f"Near Resistance: {'✅' if conditions['near_resistance'] else '❌'}")
-        
-        # Manual entry
-        st.subheader("🎯 Manual Entry")
-        manual_symbol = st.selectbox(
-            "Execute Manual Entry:",
-            options=[""] + [f"{opp['symbol']} - {opp['strategy_name']} ({opp['confidence']:.1%})" for opp in opportunities]
-        )
-        
-        if manual_symbol and st.button("🚀 Execute Manual Entry"):
-            for opp in opportunities:
-                if f"{opp['symbol']} - {opp['strategy_name']} ({opp['confidence']:.1%})" == manual_symbol:
-                    with st.spinner("Executing manual entry..."):
-                        result = bot.execute_entry(opp)
-                        if result:
-                            st.success(f"✅ Manual entry executed for {opp['symbol']}")
-                        else:
-                            st.error(f"❌ Failed to execute entry for {opp['symbol']}")
-                        st.rerun()
-                    break
-    
-    else:
-        st.info("🔍 No high-confidence opportunities found with current strategy filters")
-        
-except Exception as e:
-    st.error(f"❌ Error scanning opportunities: {e}")
+            with st.spinner("Executing top opportunity..."):
+                result = bot.execute_entry(opportunities[0])
+                if result:
+                    st.success(f"✅ Executed: {opportunities[0]['symbol']} - {opportunities[0]['strategy_name']}")
+                else:
+                    st.error("❌ Failed to execute entry")
+                st.rerun()
 
-# ==================== TRADE HISTORY ====================
+else:
+    st.info("🔍 Click 'Scan for Opportunities' to find trading signals")
 
-st.subheader("📋 Enhanced Trade History")
+# ==================== ENHANCED TRADE HISTORY ====================
+
+st.subheader("📋 Enhanced Trade History & Analytics")
 
 if bot.trades:
-    recent_trades = bot.trades[-15:]  # Show last 15 trades
+    # Trade summary
+    total_trades = len(bot.trades)
+    recent_trades = bot.trades[-20:]  # Show last 20 trades
+    
+    st.markdown(f"**📊 Showing last 20 trades (Total: {total_trades})**")
+    
     df_trades = pd.DataFrame(recent_trades)
     
-    # Display trades with enhanced styling
-    trade_display_cols = ['timestamp', 'symbol', 'strategy_name', 'action', 'quantity', 'pnl', 'hold_time', 'exit_reason', 'confidence', 'mode']
-    
-    def style_trade_pnl(val):
+    # Enhanced trade styling
+    def style_trades(val):
         if isinstance(val, (int, float)):
-            return 'color: green; font-weight: bold' if val >= 0 else 'color: red; font-weight: bold'
+            return 'background-color: #c8e6c9; font-weight: bold' if val >= 0 else 'background-color: #ffcdd2; font-weight: bold'
         return ''
     
-    styled_trades = df_trades[trade_display_cols].style.applymap(style_trade_pnl, subset=['pnl'])
-    st.dataframe(styled_trades, use_container_width=True)
+    trade_columns = ['timestamp', 'symbol', 'strategy_name', 'action', 'quantity', 'pnl', 'hold_time', 'exit_reason', 'confidence', 'mode']
     
-    # Enhanced P&L visualization
-    if len(bot.trades) > 1:
-        st.subheader("📊 Trading Performance Analysis")
+    if all(col in df_trades.columns for col in trade_columns):
+        styled_trades = df_trades[trade_columns].style.applymap(style_trades, subset=['pnl'])
+        st.dataframe(styled_trades, use_container_width=True)
+    else:
+        st.dataframe(df_trades, use_container_width=True)
+    
+    # Enhanced trade analytics
+    if len(bot.trades) > 5:
+        st.subheader("📊 Trade Analytics & Visualizations")
         
-        # Create multiple charts
         viz_col1, viz_col2 = st.columns(2)
         
         with viz_col1:
@@ -2455,187 +2699,471 @@ if bot.trades:
                 y=cumulative_pnl,
                 mode='lines+markers',
                 name='Cumulative P&L',
-                line=dict(color='blue', width=2),
-                marker=dict(size=4)
+                line=dict(color='#2E86C1', width=3),
+                marker=dict(size=6, color='#2E86C1'),
+                fill='tonexty' if any(p >= 0 for p in cumulative_pnl) else None,
+                fillcolor='rgba(46, 134, 193, 0.1)'
             ))
             
+            # Add zero line
+            fig_cumulative.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5)
+            
             fig_cumulative.update_layout(
-                title="Cumulative P&L Over Time",
+                title="📈 Cumulative P&L Progression",
                 xaxis_title="Trade Number",
                 yaxis_title="P&L (₹)",
-                height=400
+                height=400,
+                showlegend=False,
+                hovermode='x unified'
             )
             st.plotly_chart(fig_cumulative, use_container_width=True)
         
         with viz_col2:
-            # Trade distribution
+            # P&L distribution histogram
             pnls = [trade['pnl'] for trade in bot.trades]
             
             fig_dist = go.Figure()
             fig_dist.add_trace(go.Histogram(
                 x=pnls,
-                nbinsx=20,
+                nbinsx=15,
                 name="P&L Distribution",
-                marker_color='lightblue',
-                opacity=0.7
+                marker_color='#58D68D',
+                opacity=0.8,
+                text=[f"Count: {len([p for p in pnls if bin_start <= p < bin_end])}" 
+                      for bin_start, bin_end in zip(
+                          np.histogram(pnls, bins=15)[1][:-1], 
+                          np.histogram(pnls, bins=15)[1][1:]
+                      )],
+                texttemplate='%{text}',
+                textposition='auto'
             ))
             
+            # Add average line
+            avg_pnl = np.mean(pnls)
+            fig_dist.add_vline(x=avg_pnl, line_dash="dash", line_color="red", 
+                              annotation_text=f"Avg: ₹{avg_pnl:.2f}")
+            
             fig_dist.update_layout(
-                title="P&L Distribution",
+                title="📊 P&L Distribution",
                 xaxis_title="P&L (₹)",
                 yaxis_title="Frequency",
-                height=400
+                height=400,
+                showlegend=False
             )
             st.plotly_chart(fig_dist, use_container_width=True)
         
-        # Export functionality
-        st.subheader("💾 Export Data")
+        # Additional analytics
+        analytics_col1, analytics_col2 = st.columns(2)
         
-        export_col1, export_col2 = st.columns(2)
+        with analytics_col1:
+            # Strategy performance over time
+            strategy_performance = {}
+            for trade in bot.trades:
+                strategy = trade.get('strategy_name', 'Unknown')
+                if strategy not in strategy_performance:
+                    strategy_performance[strategy] = {'trades': [], 'pnls': []}
+                strategy_performance[strategy]['trades'].append(len(strategy_performance[strategy]['trades']) + 1)
+                strategy_performance[strategy]['pnls'].append(trade['pnl'])
+            
+            fig_strategy_perf = go.Figure()
+            
+            for strategy, data in strategy_performance.items():
+                if len(data['pnls']) > 1:
+                    cumulative_strategy_pnl = np.cumsum(data['pnls'])
+                    fig_strategy_perf.add_trace(go.Scatter(
+                        x=data['trades'],
+                        y=cumulative_strategy_pnl,
+                        mode='lines+markers',
+                        name=strategy,
+                        line=dict(width=2),
+                        marker=dict(size=4)
+                    ))
+            
+            fig_strategy_perf.update_layout(
+                title="📈 Strategy Performance Over Time",
+                xaxis_title="Trade Number (per strategy)",
+                yaxis_title="Cumulative P&L (₹)",
+                height=400,
+                hovermode='x unified'
+            )
+            st.plotly_chart(fig_strategy_perf, use_container_width=True)
         
-        with export_col1:
-            if st.button("📊 Export Trades to CSV"):
-                csv_data = df_trades.to_csv(index=False)
-                st.download_button(
-                    label="⬇️ Download CSV",
-                    data=csv_data,
-                    file_name=f"flyingbuddha_trades_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                    mime="text/csv"
-                )
-        
-        with export_col2:
-            if st.button("📈 Export Performance Summary"):
-                summary_data = {
-                    'Date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                    'Total Trades': len(bot.trades),
-                    'Win Rate': f"{metrics['win_rate']:.1f}%",
-                    'Total P&L': f"₹{metrics['total_pnl']:.2f}",
-                    'Best Strategy': metrics['best_strategy'],
-                    'Connection Method': bot.api.connection_method or 'yfinance'
+        with analytics_col2:
+            # Hold time vs P&L scatter
+            hold_times = [trade['hold_time'] for trade in bot.trades]
+            trade_pnls = [trade['pnl'] for trade in bot.trades]
+            
+            fig_scatter = go.Figure()
+            fig_scatter.add_trace(go.Scatter(
+                x=hold_times,
+                y=trade_pnls,
+                mode='markers',
+                marker=dict(
+                    size=8,
+                    color=trade_pnls,
+                    colorscale='RdYlGn',
+                    showscale=True,
+                    colorbar=dict(title="P&L (₹)")
+                ),
+                text=[f"{trade['symbol']}<br>{trade['strategy_name']}" for trade in bot.trades],
+                hovertemplate='<b>%{text}</b><br>Hold Time: %{x:.1f}s<br>P&L: ₹%{y:.2f}<extra></extra>'
+            ))
+            
+            fig_scatter.update_layout(
+                title="⏱️ Hold Time vs P&L Analysis",
+                xaxis_title="Hold Time (seconds)",
+                yaxis_title="P&L (₹)",
+                height=400
+            )
+            st.plotly_chart(fig_scatter, use_container_width=True)
+    
+    # Enhanced export functionality
+    st.subheader("💾 Enhanced Export & Reports")
+    
+    export_col1, export_col2, export_col3 = st.columns(3)
+    
+    with export_col1:
+        if st.button("📊 Export All Trades", use_container_width=True):
+            csv_data = df_trades.to_csv(index=False)
+            st.download_button(
+                label="⬇️ Download Complete Trade History",
+                data=csv_data,
+                file_name=f"flyingbuddha_all_trades_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+    
+    with export_col2:
+        if st.button("📈 Export Performance Report", use_container_width=True):
+            performance_report = {
+                'report_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'trading_summary': {
+                    'total_trades': len(bot.trades),
+                    'total_pnl': sum([t['pnl'] for t in bot.trades]),
+                    'win_rate': metrics['win_rate'],
+                    'profit_factor': metrics['profit_factor'],
+                    'sharpe_ratio': metrics['sharpe_ratio']
+                },
+                'risk_metrics': {
+                    'max_drawdown': bot.current_drawdown,
+                    'daily_pnl': bot.daily_pnl,
+                    'capital': bot.capital,
+                    'risk_per_trade': bot.risk_per_trade
+                },
+                'strategy_performance': {
+                    str(sid): {
+                        'name': bot.strategies.strategies[sid]['name'],
+                        'trades': stats['trades'],
+                        'success_rate': stats['success_rate'],
+                        'total_pnl': stats['total_pnl']
+                    } for sid, stats in bot.strategies.strategy_stats.items() if stats['trades'] > 0
+                },
+                'connection_details': {
+                    'method': bot.api.connection_method,
+                    'client_id': bot.api.client_id,
+                    'last_login': bot.api.last_login_time.isoformat() if bot.api.last_login_time else None
                 }
-                
-                summary_json = json.dumps(summary_data, indent=2)
-                st.download_button(
-                    label="⬇️ Download Summary",
-                    data=summary_json,
-                    file_name=f"performance_summary_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-                    mime="application/json"
-                )
+            }
+            
+            report_json = json.dumps(performance_report, indent=2, default=str)
+            st.download_button(
+                label="⬇️ Download Performance Report",
+                data=report_json,
+                file_name=f"performance_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                mime="application/json",
+                use_container_width=True
+            )
+    
+    with export_col3:
+        if st.button("🎯 Export Strategy Analysis", use_container_width=True):
+            strategy_analysis = {}
+            for strategy_id, stats in bot.strategies.strategy_stats.items():
+                if stats['trades'] > 0:
+                    strategy_trades = [t for t in bot.trades if t.get('strategy_id') == strategy_id]
+                    strategy_analysis[bot.strategies.strategies[strategy_id]['name']] = {
+                        'total_trades': stats['trades'],
+                        'success_rate': stats['success_rate'],
+                        'total_pnl': stats['total_pnl'],
+                        'avg_profit': stats['avg_profit'],
+                        'avg_loss': stats['avg_loss'],
+                        'avg_hold_time': stats['avg_hold_time'],
+                        'trade_details': strategy_trades
+                    }
+            
+            analysis_json = json.dumps(strategy_analysis, indent=2, default=str)
+            st.download_button(
+                label="⬇️ Download Strategy Analysis",
+                data=analysis_json,
+                file_name=f"strategy_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                mime="application/json",
+                use_container_width=True
+            )
 
 else:
-    st.info("📭 No trades executed yet")
+    st.info("📭 No trades executed yet. Start the bot to see comprehensive trade history and analytics.")
 
-# ==================== LIVE MARKET DATA ====================
+# ==================== ENHANCED LIVE MARKET DATA ====================
 
-st.subheader("📊 Live Market Data")
+st.subheader("📊 Enhanced Live Market Data")
 
 data_source_info = f"🟢 {bot.api.connection_method}" if bot.api.is_connected else "🟠 yfinance (Fallback)"
 st.markdown(f"**Data Source:** {data_source_info}")
 
-data_cols = st.columns(5)
+market_col1, market_col2 = st.columns(2)
 
-for i, symbol in enumerate(bot.symbols[:10]):  # Show first 10 symbols
-    with data_cols[i % 5]:
-        try:
-            if bot.api.is_connected:
-                live_data = bot.api.get_quote(symbol)
-                if live_data and live_data['price'] > 0:
-                    st.metric(symbol, f"₹{live_data['price']:.2f}", help=f"Volume: {live_data['volume']:,}")
+with market_col1:
+    if st.button("🔄 Refresh Market Data", use_container_width=True):
+        st.session_state['refresh_market'] = True
+
+with market_col2:
+    auto_refresh_market = st.checkbox("🔄 Auto-refresh market data", value=False)
+
+# Display market data
+if st.session_state.get('refresh_market', False) or auto_refresh_market:
+    market_data_cols = st.columns(5)
+    
+    for i, symbol in enumerate(bot.symbols[:15]):  # Show first 15 symbols
+        with market_data_cols[i % 5]:
+            try:
+                if bot.api.is_connected:
+                    live_data = bot.api.get_quote(symbol)
+                    if live_data and live_data['price'] > 0:
+                        change_color = "🟢" if live_data.get('change', 0) >= 0 else "🔴"
+                        change_pct = live_data.get('change_per', 0)
+                        st.metric(
+                            symbol, 
+                            f"₹{live_data['price']:.2f}",
+                            delta=f"{change_color} {change_pct:.2f}%",
+                            help=f"Volume: {live_data['volume']:,}\nHigh: ₹{live_data.get('high', 0):.2f}\nLow: ₹{live_data.get('low', 0):.2f}"
+                        )
+                    else:
+                        st.metric(symbol, "No data", help="API data unavailable")
                 else:
-                    st.metric(symbol, "No data")
-            else:
-                ticker = yf.Ticker(f"{symbol}.NS")
-                hist = ticker.history(period="1d", interval="1m")
-                if len(hist) > 0:
-                    current_price = hist.iloc[-1]['Close']
-                    st.metric(symbol, f"₹{current_price:.2f}")
-                else:
-                    st.metric(symbol, "No data")
-        except Exception as e:
-            st.metric(symbol, "Error")
+                    # Fallback to yfinance
+                    ticker = yf.Ticker(f"{symbol}.NS")
+                    hist = ticker.history(period="1d", interval="1m")
+                    if len(hist) > 0:
+                        current_price = hist.iloc[-1]['Close']
+                        prev_price = hist.iloc[-2]['Close'] if len(hist) > 1 else current_price
+                        change_pct = ((current_price - prev_price) / prev_price) * 100
+                        change_color = "🟢" if change_pct >= 0 else "🔴"
+                        st.metric(
+                            symbol, 
+                            f"₹{current_price:.2f}",
+                            delta=f"{change_color} {change_pct:.2f}%",
+                            help="Data from yfinance"
+                        )
+                    else:
+                        st.metric(symbol, "Error", help="Data fetch failed")
+            except Exception as e:
+                st.metric(symbol, "Error", help=f"Error: {str(e)[:50]}")
+    
+    st.session_state['refresh_market'] = False
 
-# ==================== SYSTEM DIAGNOSTICS ====================
+# ==================== SYSTEM DIAGNOSTICS & SETTINGS ====================
 
-with st.expander("⚙️ System Diagnostics & Settings", expanded=False):
-    st.subheader("🔧 System Status")
+with st.expander("⚙️ Enhanced System Diagnostics & Advanced Settings", expanded=False):
+    st.subheader("🔧 System Status & Diagnostics")
     
     diag_col1, diag_col2, diag_col3 = st.columns(3)
     
     with diag_col1:
-        st.markdown("**API & Connection:**")
-        st.write(f"gwcmodel: {'✅ Available' if GWCMODEL_AVAILABLE else '❌ Missing'}")
+        st.markdown("**🔗 API & Connection Status:**")
+        st.write(f"gwcmodel Available: {'✅' if GWCMODEL_AVAILABLE else '❌'}")
+        st.write(f"gwcmodel Class: {'✅' if GWC_CLASS else '❌'} {GWC_CLASS_NAME or 'None'}")
         st.write(f"Goodwill API: {'✅ Connected' if bot.api.is_connected else '❌ Disconnected'}")
         st.write(f"Connection Method: {bot.api.connection_method or 'None'}")
         st.write(f"Database: {'✅ Active' if hasattr(bot, 'conn') else '❌ Failed'}")
+        st.write(f"Session Duration: {(datetime.now() - bot.api.last_login_time).total_seconds() / 60:.1f}m" if bot.api.last_login_time else "N/A")
     
     with diag_col2:
-        st.markdown("**Performance:**")
+        st.markdown("**📊 Performance Metrics:**")
         st.write(f"Active Strategies: {len([s for s in bot.strategies.strategy_stats.values() if s['trades'] > 0])}/8")
         st.write(f"Cache Size: {len(bot.strategies.analysis_cache)} items")
         st.write(f"Database Records: {len(bot.trades)} trades")
-        st.write(f"Session Duration: {(datetime.now() - datetime.now().replace(hour=9, minute=15)).total_seconds() / 3600:.1f}h")
+        st.write(f"Memory Usage: {len(str(bot.positions)) + len(str(bot.trades))} bytes")
+        st.write(f"Symbols Tracked: {len(bot.symbols)}")
+        st.write(f"Peak Capital: ₹{bot.peak_capital:,.2f}")
     
     with diag_col3:
-        st.markdown("**Risk Status:**")
-        st.write(f"Risk Limits: {'✅ Within Limits' if bot.check_risk_limits() else '⚠️ Breached'}")
-        st.write(f"Position Limits: {'✅ OK' if len(bot.positions) <= bot.max_positions else '⚠️ Exceeded'}")
+        st.markdown("**🛡️ Risk & Safety Status:**")
+        risk_status = "✅ Within Limits" if bot.check_risk_limits() else "⚠️ Breached"
+        position_status = "✅ OK" if len(bot.positions) <= bot.max_positions else "⚠️ Exceeded"
+        
+        st.write(f"Risk Limits: {risk_status}")
+        st.write(f"Position Limits: {position_status}")
         st.write(f"Daily P&L: ₹{bot.daily_pnl:.2f}")
         st.write(f"Max Drawdown: ₹{bot.current_drawdown:.2f}")
+        st.write(f"Risk per Trade: {bot.risk_per_trade:.1%}")
+        st.write(f"Total Risk Exposure: {len(bot.positions) * bot.risk_per_trade:.1%}")
+    
+    # Advanced settings
+    st.subheader("🔧 Advanced Settings")
+    
+    settings_col1, settings_col2 = st.columns(2)
+    
+    with settings_col1:
+        st.markdown("**⚙️ Trading Parameters:**")
+        new_daily_limit = st.slider("Daily Loss Limit (%)", 1, 10, int(bot.daily_loss_limit * 100))
+        bot.daily_loss_limit = new_daily_limit / 100
+        
+        new_drawdown_limit = st.slider("Max Drawdown Limit (%)", 5, 20, int(bot.max_drawdown_limit * 100))
+        bot.max_drawdown_limit = new_drawdown_limit / 100
+        
+        strategy_timeout = st.slider("Strategy Cache Timeout (sec)", 10, 120, bot.strategies.cache_timeout)
+        bot.strategies.cache_timeout = strategy_timeout
+    
+    with settings_col2:
+        st.markdown("**🔄 System Actions:**")
+        
+        if st.button("🧹 Clear Strategy Cache"):
+            bot.strategies.analysis_cache.clear()
+            st.success("✅ Strategy cache cleared")
+        
+        if st.button("🗃️ Clear Token Cache"):
+            token_keys = [k for k in st.session_state.keys() if k.startswith("token_")]
+            for key in token_keys:
+                del st.session_state[key]
+            st.success("✅ Token cache cleared")
+        
+        if st.button("💾 Save Strategy Performance"):
+            try:
+                cursor = bot.conn.cursor()
+                for strategy_id, stats in bot.strategies.strategy_stats.items():
+                    if stats['trades'] > 0:
+                        cursor.execute('''
+                            INSERT OR REPLACE INTO strategy_performance VALUES 
+                            (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ''', (
+                            strategy_id, bot.strategies.strategies[strategy_id]['name'],
+                            stats['trades'], stats['wins'], stats['total_pnl'],
+                            stats['success_rate'], stats['avg_profit'], stats['avg_loss'],
+                            stats['avg_hold_time'], datetime.now()
+                        ))
+                bot.conn.commit()
+                st.success("✅ Strategy performance saved to database")
+            except Exception as e:
+                st.error(f"❌ Database save error: {e}")
+        
+        if st.button("🔄 Reset Daily P&L"):
+            bot.daily_pnl = 0.0
+            st.success("✅ Daily P&L reset")
 
-# ==================== FOOTER ====================
+# ==================== AUTO-REFRESH LOGIC ====================
+
+# Auto-refresh when bot is running
+if bot.is_running:
+    bot.run_trading_cycle()
+    time.sleep(3)  # 3-second cycle for production
+    st.rerun()
+
+# Auto-scan for opportunities
+if auto_scan and not bot.is_running:
+    current_time = time.time()
+    if 'last_auto_scan' not in st.session_state:
+        st.session_state['last_auto_scan'] = 0
+    
+    if current_time - st.session_state['last_auto_scan'] > 30:  # 30 seconds
+        with st.spinner("🔄 Auto-scanning opportunities..."):
+            opportunities = bot.scan_for_opportunities()
+            st.session_state['latest_opportunities'] = opportunities
+            st.session_state['last_auto_scan'] = current_time
+        st.rerun()
+
+# ==================== ENHANCED FOOTER ====================
 
 st.markdown("---")
 
 st.markdown("""
-### 🚀 FlyingBuddha Complete Production Scalping Bot
+### 🚀 FlyingBuddha Complete Fixed Production Scalping Bot
 
-**🎯 8 Advanced Strategies with Intelligent Selection:**
-1. **Momentum Breakout** - Price breakouts with volume confirmation
-2. **Mean Reversion** - RSI oversold/overbought signals with Bollinger touches
-3. **Volume Spike** - High volume momentum moves (>1.8x average)
-4. **Bollinger Squeeze** - Low volatility breakouts from consolidation
-5. **RSI Divergence** - RSI extremes at support/resistance levels
-6. **VWAP Touch** - Price reactions near Volume Weighted Average Price
-7. **Support/Resistance** - Bounces at identified key levels
-8. **News Momentum** - High volume + volatility indicating news events
+**🎯 Complete 8-Strategy System with FIXED Goodwill Integration:**
 
-**🔧 Technical Features:**
-- ✅ **gwcmodel Integration** - Official Goodwill library as primary method
-- ✅ **Direct API Fallback** - Robust authentication with multiple methods
-- ✅ **Real-time Data** - Live quotes and order placement
-- ✅ **Advanced Risk Management** - 5% daily loss limit, 10% max drawdown
-- ✅ **Production Database** - SQLite logging of all trades and performance
-- ✅ **Dynamic Strategy Selection** - Market condition-based strategy picking
+1. **🔥 Momentum Breakout** - Price breakouts with volume confirmation and trend validation
+2. **🎯 Mean Reversion** - RSI oversold/overbought signals with Bollinger Band touches  
+3. **📊 Volume Spike** - High volume momentum moves (>1.8x average) with price acceleration
+4. **🎪 Bollinger Squeeze** - Low volatility breakouts from consolidation patterns
+5. **⚡ RSI Divergence** - RSI extremes at key support/resistance levels
+6. **📈 VWAP Touch** - Price reactions near Volume Weighted Average Price
+7. **🏗️ Support/Resistance** - Bounces and rejections at identified key levels  
+8. **📰 News Momentum** - High volume + volatility events indicating news-driven moves
 
-**⚙️ Trading Parameters:**
-- Risk per trade: 15% | Max positions: 4 | Hold time: 3 min max
-- Risk:Reward ratio: 1:2 | Stop loss: Dynamic trailing mechanism
-- Position sizing: Volatility-adjusted with drawdown protection
+**🔧 COMPLETE FIXES IMPLEMENTED:**
 
-**🔗 API Integration:**
-- Primary: gwcmodel library for seamless Goodwill integration
-- Fallback: Direct API calls to api.gwcindia.in/v1/ endpoints
-- Authentication: Multiple methods (credentials, request token)
-- Real orders: Live mode places actual trades via gwcmodel/API
+✅ **Enhanced gwcmodel Detection** - Comprehensive class scanning with multiple initialization methods  
+✅ **Proper Request Token Flow** - Complete implementation per official Goodwill API documentation  
+✅ **Automatic URL Parser** - Extracts request_token from any redirect URL format  
+✅ **Robust Signature Generation** - Correct SHA-256 checksum as per API specifications  
+✅ **Multiple Authentication Methods** - gwcmodel + Direct API with intelligent fallbacks  
+✅ **Production Error Handling** - Detailed error messages with specific solutions  
+✅ **Enhanced Risk Management** - 5% daily loss limit, 10% max drawdown protection  
+✅ **Advanced Performance Analytics** - Comprehensive metrics, charts, and strategy tracking  
+✅ **Real-time Data Integration** - Live quotes via Goodwill API with yfinance fallback  
+✅ **Production Database Logging** - Complete trade history and performance persistence  
 
-⚠️ **Risk Warning:** This bot trades with real money in Live Mode. Always test thoroughly in Paper Mode first and never risk more than you can afford to lose.
+**📋 Complete Authentication Flow:**
+1. **Generate Login URL** with your API key
+2. **Login via Goodwill Website** using your trading credentials  
+3. **Copy Complete Redirect URL** from browser after successful login
+4. **Automatic Token Extraction** and signature generation
+5. **Secure API Authentication** with full session management
+
+**🛡️ Production Risk Management:**
+- Dynamic position sizing based on volatility and drawdown
+- Advanced trailing stops with profit protection
+- Real-time risk monitoring with automatic circuit breakers
+- Comprehensive performance tracking across all strategies
+- Emergency position management with manual override controls
+
+**🔗 Technical Foundation:**
+- **API Documentation:** https://developer.gwcindia.in/api/
+- **Request Token Flow:** Implemented exactly as per official specifications
+- **gwcmodel Integration:** Enhanced detection and initialization  
+- **Error Handling:** All documented API errors mapped to user solutions
+- **Fallback Systems:** Multiple layers of redundancy for reliability
+
+**⚙️ Advanced Features:**
+- Real-time strategy performance comparison and selection
+- Dynamic market condition analysis with 15+ technical indicators  
+- Advanced order management with multiple order types
+- Comprehensive trade analytics with visual performance tracking
+- Export capabilities for trade history and performance reports
+- Auto-refresh market data with connection status monitoring
+
+⚠️ **Production Trading Warning:** This bot places real orders in Live Mode. Always test thoroughly in Paper Mode and never risk more than you can afford to lose. The 8-strategy system is designed for experienced traders who understand scalping risks.
+
+🎯 **For Support:** This is a complete production implementation. All major authentication and integration issues have been resolved with this fixed version.
 """)
 
-# Auto-refresh indicator
+# Enhanced status indicator
 if bot.is_running:
+    current_time = datetime.now().strftime('%H:%M:%S')
+    connection_info = f" | {bot.api.connection_method}" if bot.api.is_connected else " | Offline"
+    position_info = f" | {len(bot.positions)}/{bot.max_positions} positions"
+    pnl_info = f" | Daily P&L: ₹{bot.daily_pnl:.0f}"
+    
     st.markdown(f"""
-    <div style="position: fixed; bottom: 20px; right: 20px; background-color: #4CAF50; color: white; padding: 10px; border-radius: 5px; z-index: 1000;">
-        🔄 Bot Active | Last Update: {datetime.now().strftime('%H:%M:%S')} | Next: 3s
+    <div style="position: fixed; bottom: 20px; right: 20px; background: linear-gradient(90deg, #4CAF50, #45a049); color: white; padding: 12px 20px; border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.3); z-index: 1000; font-weight: bold;">
+        🔄 <strong>LIVE TRADING ACTIVE</strong><br>
+        <small>⏰ {current_time} | 🎯 8 Strategies{connection_info}{position_info}{pnl_info}</small>
     </div>
     """, unsafe_allow_html=True)
-    time.sleep(1)
+else:
+    st.markdown(f"""
+    <div style="position: fixed; bottom: 20px; right: 20px; background: linear-gradient(90deg, #FF9800, #F57C00); color: white; padding: 12px 20px; border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.3); z-index: 1000; font-weight: bold;">
+        ⏸️ <strong>BOT STOPPED</strong><br>
+        <small>Ready to trade | {len(bot.symbols)} symbols | {'🟢 Connected' if bot.api.is_connected else '🔴 Offline'}</small>
+    </div>
+    """, unsafe_allow_html=True)
 
-# End of application
+# Final application footer
 st.markdown("""
-<div style='text-align: center; color: #666; font-size: 12px; margin-top: 30px;'>
-    ⚡ FlyingBuddha Production Scalping Bot v4.0 | Complete 8-Strategy System<br>
-    <strong>🎯 Intelligent Strategy Selection | 🔥 Real gwcmodel Integration | 📊 Live API Trading | 🛡️ Advanced Risk Management</strong>
+<div style='text-align: center; color: #666; font-size: 12px; margin-top: 50px; padding: 20px; background-color: #f8f9fa; border-radius: 10px;'>
+    ⚡ <strong>FlyingBuddha Production Scalping Bot v2.0 - COMPLETE FIXED VERSION</strong><br>
+    🎯 <strong>8 Advanced Strategies | 🔧 Enhanced gwcmodel Integration | 🎫 Proper Request Token Flow | 🛡️ Production Risk Management</strong><br>
+    <em>Built with Streamlit | Powered by Goodwill API | Real-time Trading System</em><br>
+    <small>⚠️ For educational and trading purposes. Trade responsibly and never risk more than you can afford to lose.</small>
 </div>
 """, unsafe_allow_html=True)
 
-# ==================== END OF APPLICATION ====================
+# ==================== END OF COMPLETE APPLICATION ====================
